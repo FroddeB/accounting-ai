@@ -62,7 +62,7 @@ bilagRouter.post(
       return;
     }
     try {
-      await uploadVoucherAttachment(journalNumber, voucherId, file.buffer, file.mimetype);
+      await uploadVoucherAttachment(journalNumber, voucherId, file.buffer, file.mimetype, file.originalname);
       await recordAudit({
         actor: req.user!.email,
         toolName: "bilag.upload",

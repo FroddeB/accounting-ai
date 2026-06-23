@@ -56,21 +56,25 @@ export async function listJournals(): Promise<JournalSummary[]> {
 }
 
 /**
- * Upload a bilag (receipt/invoice) to a voucher. POSTs the raw file bytes to the
- * voucher's attachment/file endpoint. e-conomic accepts the file with its own
- * mime type (application/pdf, image/jpeg, image/png, ...).
+ * Upload a bilag (receipt/invoice) to a voucher. e-conomic's attachment/file
+ * endpoint requires multipart/form-data (it rejects raw binary with 415), so we
+ * send the file as a multipart part. Do NOT set Content-Type manually — fetch
+ * adds the multipart boundary itself.
  */
 export async function uploadVoucherAttachment(
   journalNumber: number,
   voucherId: string,
   bytes: Buffer,
   contentType: string,
+  filename: string,
 ): Promise<void> {
   const url = `${config.economic.baseRest}/journals/${journalNumber}/vouchers/${voucherId}/attachment/file`;
+  const form = new FormData();
+  form.append("file", new Blob([bytes], { type: contentType }), filename);
   const res = await fetch(url, {
     method: "POST",
-    headers: headers({ "Content-Type": contentType }),
-    body: bytes,
+    headers: headers(), // auth only; fetch sets multipart Content-Type + boundary
+    body: form,
   });
   if (!res.ok) throw new Error(`Attachment upload → ${res.status}: ${await res.text()}`);
 }

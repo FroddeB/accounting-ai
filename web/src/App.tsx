@@ -6,6 +6,9 @@ import { Forgot } from "./pages/Forgot";
 import { Reset } from "./pages/Reset";
 import { Dashboard } from "./pages/Dashboard";
 import { Bilag } from "./pages/Bilag";
+import { Invoices } from "./pages/Invoices";
+import { History } from "./pages/History";
+import { Team } from "./pages/Team";
 
 export function App() {
   const { loading } = useAuth();
@@ -19,7 +22,10 @@ export function App() {
       <Route path="/reset" element={<Reset />} />
       <Route element={<Protected><Layout /></Protected>}>
         <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/invoices" element={<Invoices />} />
         <Route path="/bilag" element={<Bilag />} />
+        <Route path="/history" element={<History />} />
+        <Route path="/team" element={<Team />} />
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

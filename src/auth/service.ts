@@ -44,11 +44,49 @@ async function findUserByEmail(email: string): Promise<UserRow | null> {
 /** Insert the bootstrap admin (no password) if it doesn't already exist. */
 export async function ensureAdmin(): Promise<void> {
   await query(
-    `INSERT INTO users (email, is_admin, display_name)
-     VALUES ($1, true, 'Admin')
-     ON CONFLICT (email) DO NOTHING`,
+    `INSERT INTO users (email, is_admin, role, display_name)
+     VALUES ($1, true, 'admin', 'Admin')
+     ON CONFLICT (email) DO UPDATE SET is_admin = true, role = 'admin'`,
     [config.adminEmail],
   );
+}
+
+export interface TeamMember {
+  id: string;
+  email: string;
+  role: string;
+  is_admin: boolean;
+  created_at: string;
+  last_login_at: string | null;
+  has_password: boolean;
+}
+
+export async function listTeam(): Promise<TeamMember[]> {
+  const r = await query<TeamMember>(
+    `SELECT id, email, role, is_admin, created_at, last_login_at,
+            (password_hash IS NOT NULL) AS has_password
+       FROM users ORDER BY is_admin DESC, created_at`,
+  );
+  return r.rows;
+}
+
+/**
+ * Invite a team member: create a password-less account and email them a link to
+ * set their password (the same flow as forgot-password). Idempotent on email.
+ */
+export async function inviteMember(email: string): Promise<{ created: boolean }> {
+  const existing = await findUserByEmail(email);
+  if (existing) {
+    // Re-send the set-password email so an un-onboarded invite can be resumed.
+    await startPasswordReset(email);
+    return { created: false };
+  }
+  await query(
+    `INSERT INTO users (email, is_admin, role) VALUES ($1, false, 'member')`,
+    [email],
+  );
+  await startPasswordReset(email);
+  return { created: true };
 }
 
 /**

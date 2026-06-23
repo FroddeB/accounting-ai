@@ -1,7 +1,7 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../auth";
 import { Button } from "@/components/ui/button";
-import { LayoutDashboard, Paperclip } from "lucide-react";
+import { Clock, LayoutDashboard, Paperclip, Sparkles, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export function Layout() {
@@ -15,14 +15,13 @@ export function Layout() {
   return (
     <div className="min-h-screen bg-muted/40">
       <header className="border-b bg-background">
-        <div className="mx-auto flex max-w-5xl items-center gap-2 px-6 py-2.5">
+        <div className="mx-auto flex max-w-5xl items-center gap-1 px-6 py-2.5">
           <strong className="mr-2 text-sm">Projekt Y</strong>
-          <NavLink to="/dashboard" className={link}>
-            <LayoutDashboard className="size-4" /> Dashboard
-          </NavLink>
-          <NavLink to="/bilag" className={link}>
-            <Paperclip className="size-4" /> Bilag
-          </NavLink>
+          <NavLink to="/dashboard" className={link}><LayoutDashboard className="size-4" /> Dashboard</NavLink>
+          <NavLink to="/invoices" className={link}><Sparkles className="size-4" /> Invoices</NavLink>
+          <NavLink to="/bilag" className={link}><Paperclip className="size-4" /> Bilag</NavLink>
+          <NavLink to="/history" className={link}><Clock className="size-4" /> History</NavLink>
+          {user?.admin && <NavLink to="/team" className={link}><Users className="size-4" /> Team</NavLink>}
           <div className="flex-1" />
           <span className="text-sm text-muted-foreground">{user?.email}</span>
           <Button variant="ghost" size="sm" onClick={logout}>Log out</Button>

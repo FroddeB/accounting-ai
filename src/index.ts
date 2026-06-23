@@ -10,6 +10,8 @@ import { loadUser } from "./auth/middleware.js";
 import { authRouter } from "./api/auth.js";
 import { bilagRouter } from "./api/bilag.js";
 import { dashboardRouter } from "./api/dashboard.js";
+import { invoicesRouter } from "./api/invoices.js";
+import { teamRouter } from "./api/team.js";
 import { ensureAdmin } from "./auth/service.js";
 
 /**
@@ -51,6 +53,8 @@ app.get("/health", async (_req, res) => {
 app.use("/api/auth", authRouter);
 app.use("/api/bilag", bilagRouter);
 app.use("/api/dashboard", dashboardRouter);
+app.use("/api/invoices", invoicesRouter);
+app.use("/api/team", teamRouter);
 
 // ── MCP endpoint ─────────────────────────────────────────────────────────────
 app.post("/mcp", async (req, res) => {

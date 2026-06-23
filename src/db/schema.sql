@@ -50,6 +50,9 @@ CREATE TABLE IF NOT EXISTS users (
 -- Normalise email lookups to lowercase.
 CREATE UNIQUE INDEX IF NOT EXISTS users_email_lower_idx ON users (lower(email));
 
+-- Team role (added after initial release; idempotent).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'member';
+
 -- Short-lived single-use tokens for email 2FA codes and password resets.
 CREATE TABLE IF NOT EXISTS email_tokens (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -64,6 +67,42 @@ CREATE TABLE IF NOT EXISTS email_tokens (
 
 CREATE INDEX IF NOT EXISTS email_tokens_user_purpose_idx
   ON email_tokens (user_id, purpose, expires_at);
+
+-- ── AI invoice jobs (history of everything the AI does) ─────────────────────
+-- One row per uploaded invoice/receipt. Records the file, Claude's extraction
+-- and voucher suggestion, and the human decision. `source` is 'upload' today;
+-- 'email' is reserved for future automatic ingestion straight from the inbox.
+CREATE TABLE IF NOT EXISTS ai_jobs (
+  id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+  source               TEXT NOT NULL DEFAULT 'upload',     -- upload | email
+  created_by           TEXT NOT NULL,                      -- actor email
+  filename             TEXT,
+  mimetype             TEXT,
+  file_data            BYTEA,                              -- kept until attached, then cleared
+  status               TEXT NOT NULL DEFAULT 'processing', -- processing | suggested | attached | rejected | error
+  -- Claude's extracted invoice fields
+  supplier_name        TEXT,
+  invoice_number       TEXT,
+  invoice_date         TEXT,
+  currency             TEXT,
+  total_amount         NUMERIC,
+  -- Claude's voucher match
+  match_journal_number INT,
+  match_voucher_id     TEXT,
+  match_voucher_number INT,
+  match_confidence     TEXT,                               -- high | medium | low | none
+  match_reasoning      TEXT,
+  ai_raw               JSONB,                              -- full structured response incl. alternates
+  -- Outcome
+  attached_voucher_id  TEXT,
+  decided_by           TEXT,
+  decided_at           TIMESTAMPTZ,
+  error                TEXT
+);
+
+CREATE INDEX IF NOT EXISTS ai_jobs_created_at_idx ON ai_jobs (created_at DESC);
+CREATE INDEX IF NOT EXISTS ai_jobs_status_idx ON ai_jobs (status);
 
 -- Vouchers a user has chosen to "ignore" (flagged only in our DB, never in
 -- e-conomic). Ignored vouchers are hidden from the missing/all views and shown

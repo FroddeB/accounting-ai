@@ -60,6 +60,11 @@ export const config = {
     senderEmail: optional("BREVO_SENDER_EMAIL", "noreply@y.dk"),
     senderName: optional("BREVO_SENDER_NAME", "Projekt Y Accounting"),
   },
+
+  anthropic: {
+    apiKey: process.env.ANTHROPIC_API_KEY ?? "",
+    model: optional("ANTHROPIC_MODEL", "claude-opus-4-8"),
+  },
 } as const;
 
 export type Config = typeof config;

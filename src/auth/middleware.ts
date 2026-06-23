@@ -35,6 +35,19 @@ export function requireAuth(req: AuthedRequest, res: Response, next: NextFunctio
   next();
 }
 
+/** Reject unless the session belongs to an admin. */
+export function requireAdmin(req: AuthedRequest, res: Response, next: NextFunction): void {
+  if (!req.user) {
+    res.status(401).json({ error: "Authentication required" });
+    return;
+  }
+  if (!req.user.admin) {
+    res.status(403).json({ error: "Admin only" });
+    return;
+  }
+  next();
+}
+
 export function setSessionCookie(res: Response, token: string): void {
   res.cookie(SESSION_COOKIE, token, {
     httpOnly: true,

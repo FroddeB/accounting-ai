@@ -1,6 +1,12 @@
 # Claude Code local settings (machine-specific)
 .claude/settings.local.json
 
+# Agent skills / tooling (installed locally, not app code)
+.claude/skills/
+.agents/
+.cursor/
+skills-lock.json
+
 # Node
 node_modules/
 dist/
@@ -16,3 +22,6 @@ Thumbs.db
 .DS_Store
 .vscode/
 .idea/
+
+# TS build info
+*.tsbuildinfo

@@ -45,6 +45,21 @@ export const config = {
 
   /** When true, write tools simulate and record a dry_run audit entry instead of mutating. */
   dryRunDefault: bool("DRY_RUN_DEFAULT", true),
+
+  /** Secret used to sign session tokens (HMAC). Falls back to MCP_AUTH_TOKEN if unset. */
+  sessionSecret: optional("SESSION_SECRET", process.env.MCP_AUTH_TOKEN ?? "dev-session-secret"),
+
+  /** Public base URL of the app, used to build password-reset links in emails. */
+  appBaseUrl: optional("APP_BASE_URL", "http://localhost:3000"),
+
+  /** First admin account, bootstrapped with no password (must use forgot-password). */
+  adminEmail: optional("ADMIN_EMAIL", "fb@y.dk"),
+
+  brevo: {
+    apiKey: process.env.BREVO_API_KEY ?? "",
+    senderEmail: optional("BREVO_SENDER_EMAIL", "noreply@y.dk"),
+    senderName: optional("BREVO_SENDER_NAME", "Projekt Y Accounting"),
+  },
 } as const;
 
 export type Config = typeof config;

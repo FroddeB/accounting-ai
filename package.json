@@ -8,9 +8,11 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && npm --prefix web ci && npm --prefix web run build",
+    "build:server": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
+    "dev:web": "npm --prefix web run dev",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "db:init": "node --import tsx scripts/db-init.ts"
   },
@@ -18,11 +20,13 @@
     "@modelcontextprotocol/sdk": "^1.18.0",
     "dotenv": "^16.4.5",
     "express": "^5.0.1",
+    "multer": "^2.0.0",
     "pg": "^8.13.1",
     "zod": "^3.24.1"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",
+    "@types/multer": "^1.4.12",
     "@types/node": "^22.10.5",
     "@types/pg": "^8.11.10",
     "tsx": "^4.19.2",

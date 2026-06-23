@@ -106,9 +106,12 @@ export function registerEconomicReadTools(server: McpServer): void {
     {
       title: "Get account balance",
       description:
-        "Fetch a single ledger account by its account number and return its current balance.",
+        "Fetch a single ledger account and return BOTH its booked balance and its draft " +
+        "balance. draftBalance includes unbooked daybook (Kassekladde) entries — for agreements " +
+        "whose activity is still in drafts (e.g. a live bank feed), bookedBalance can be 0 while " +
+        "draftBalance reflects the real, current figure.",
       inputSchema: {
-        accountNumber: z.number().int().describe("The e-conomic account number, e.g. 1000."),
+        accountNumber: z.number().int().describe("The e-conomic account number, e.g. 5820."),
       },
     },
     async ({ accountNumber }) =>
@@ -119,12 +122,14 @@ export function registerEconomicReadTools(server: McpServer): void {
             accountNumber: number;
             name?: string;
             balance?: number;
+            draftBalance?: number;
             accountType?: string;
           }>(`/accounts/${accountNumber}`);
           return ok({
             accountNumber: account.accountNumber,
             name: account.name ?? null,
-            balance: account.balance ?? null,
+            bookedBalance: account.balance ?? null,
+            draftBalance: account.draftBalance ?? null,
             accountType: account.accountType ?? null,
           });
         },

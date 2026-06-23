@@ -35,6 +35,36 @@ CREATE TABLE IF NOT EXISTS pending_actions (
 
 CREATE INDEX IF NOT EXISTS pending_actions_status_idx ON pending_actions (status);
 
+-- ── Web app: users & email-based auth ───────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS users (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email           TEXT NOT NULL UNIQUE,
+  password_hash   TEXT,                  -- NULL until the user sets one via reset
+  display_name    TEXT,
+  is_admin        BOOLEAN NOT NULL DEFAULT false,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_login_at   TIMESTAMPTZ
+);
+
+-- Normalise email lookups to lowercase.
+CREATE UNIQUE INDEX IF NOT EXISTS users_email_lower_idx ON users (lower(email));
+
+-- Short-lived single-use tokens for email 2FA codes and password resets.
+CREATE TABLE IF NOT EXISTS email_tokens (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id       UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  purpose       TEXT NOT NULL,           -- 'twofa' | 'password_reset'
+  code_hash     TEXT NOT NULL,           -- hashed OTP / reset token
+  expires_at    TIMESTAMPTZ NOT NULL,
+  consumed_at   TIMESTAMPTZ,
+  attempts      INT NOT NULL DEFAULT 0,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS email_tokens_user_purpose_idx
+  ON email_tokens (user_id, purpose, expires_at);
+
 -- Optional cached reference data to avoid repeated per-agreement lookups
 -- (layout, payment terms, VAT zone, currency, account references).
 CREATE TABLE IF NOT EXISTS economic_refs (

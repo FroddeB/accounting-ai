@@ -65,6 +65,21 @@ CREATE TABLE IF NOT EXISTS email_tokens (
 CREATE INDEX IF NOT EXISTS email_tokens_user_purpose_idx
   ON email_tokens (user_id, purpose, expires_at);
 
+-- Vouchers a user has chosen to "ignore" (flagged only in our DB, never in
+-- e-conomic). Ignored vouchers are hidden from the missing/all views and shown
+-- only under the "ignored" filter. Keyed like the attachment cross-reference:
+-- (accounting_year, voucher_number) is unique per agreement.
+CREATE TABLE IF NOT EXISTS ignored_vouchers (
+  accounting_year TEXT NOT NULL,
+  voucher_number  INT NOT NULL,
+  journal_number  INT NOT NULL,
+  voucher_id      TEXT NOT NULL,
+  ignored_by      TEXT NOT NULL,
+  reason          TEXT,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (accounting_year, voucher_number)
+);
+
 -- Optional cached reference data to avoid repeated per-agreement lookups
 -- (layout, payment terms, VAT zone, currency, account references).
 CREATE TABLE IF NOT EXISTS economic_refs (

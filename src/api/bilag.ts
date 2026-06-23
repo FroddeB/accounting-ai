@@ -8,6 +8,7 @@ import {
   deleteVoucherAttachment,
 } from "../clients/economicBilag.js";
 import { recordAudit } from "../db/audit.js";
+import { getIgnoredKeys, addIgnored, removeIgnored, ignoreKey, type IgnoreInput } from "../db/ignored.js";
 
 export const bilagRouter = Router();
 
@@ -31,21 +32,75 @@ bilagRouter.get("/journals", async (_req, res) => {
   }
 });
 
-// List a journal's vouchers, each flagged hasAttachment. ?missing=true → only those without.
+// List a journal's vouchers, each flagged hasAttachment + ignored.
 bilagRouter.get("/journals/:journalNumber/vouchers", async (req, res) => {
   try {
     const journalNumber = Number(req.params.journalNumber);
-    const all = await listVouchersWithAttachmentStatus(journalNumber);
-    const vouchers = req.query.missing === "true" ? all.filter((v) => !v.hasAttachment) : all;
+    const [base, ignored] = await Promise.all([
+      listVouchersWithAttachmentStatus(journalNumber),
+      getIgnoredKeys(),
+    ]);
+    const vouchers = base.map((v) => ({
+      ...v,
+      ignored: ignored.has(ignoreKey(v.accountingYear, v.voucherNumber)),
+    }));
     res.json({
       journalNumber,
-      total: all.length,
-      missing: all.filter((v) => !v.hasAttachment).length,
+      total: vouchers.length,
+      // "missing" = no attachment AND not ignored (the actionable set).
+      missing: vouchers.filter((v) => !v.hasAttachment && !v.ignored).length,
+      ignored: vouchers.filter((v) => v.ignored).length,
       vouchers,
     });
   } catch (err) {
     console.error("[bilag] vouchers:", err);
     res.status(502).json({ error: "Failed to load vouchers from e-conomic" });
+  }
+});
+
+// Ignore one or more vouchers (flag in our DB only). Body: { vouchers: IgnoreInput[], reason? }.
+bilagRouter.post("/ignore", async (req: AuthedRequest, res) => {
+  try {
+    const vouchers = (req.body?.vouchers ?? []) as IgnoreInput[];
+    if (!Array.isArray(vouchers) || vouchers.length === 0) {
+      res.status(400).json({ error: "Provide a non-empty 'vouchers' array" });
+      return;
+    }
+    const added = await addIgnored(vouchers, req.user!.email, req.body?.reason);
+    await recordAudit({
+      actor: req.user!.email,
+      toolName: "bilag.ignore",
+      request: { count: vouchers.length, keys: vouchers.map((v) => ignoreKey(v.accountingYear, v.voucherNumber)), reason: req.body?.reason },
+      response: { added },
+      status: "success",
+    });
+    res.json({ ok: true, added });
+  } catch (err) {
+    console.error("[bilag] ignore:", err);
+    res.status(500).json({ error: "Failed to ignore vouchers" });
+  }
+});
+
+// Un-ignore one or more vouchers. Body: { vouchers: [{ accountingYear, voucherNumber }] }.
+bilagRouter.post("/unignore", async (req: AuthedRequest, res) => {
+  try {
+    const vouchers = (req.body?.vouchers ?? []) as { accountingYear: string; voucherNumber: number }[];
+    if (!Array.isArray(vouchers) || vouchers.length === 0) {
+      res.status(400).json({ error: "Provide a non-empty 'vouchers' array" });
+      return;
+    }
+    const removed = await removeIgnored(vouchers);
+    await recordAudit({
+      actor: req.user!.email,
+      toolName: "bilag.unignore",
+      request: { count: vouchers.length, keys: vouchers.map((v) => ignoreKey(v.accountingYear, v.voucherNumber)) },
+      response: { removed },
+      status: "success",
+    });
+    res.json({ ok: true, removed });
+  } catch (err) {
+    console.error("[bilag] unignore:", err);
+    res.status(500).json({ error: "Failed to un-ignore vouchers" });
   }
 });
 

@@ -9,6 +9,7 @@ import { pool } from "./db/pool.js";
 import { loadUser } from "./auth/middleware.js";
 import { authRouter } from "./api/auth.js";
 import { bilagRouter } from "./api/bilag.js";
+import { dashboardRouter } from "./api/dashboard.js";
 import { ensureAdmin } from "./auth/service.js";
 
 /**
@@ -49,6 +50,7 @@ app.get("/health", async (_req, res) => {
 // ── Web app API ──────────────────────────────────────────────────────────────
 app.use("/api/auth", authRouter);
 app.use("/api/bilag", bilagRouter);
+app.use("/api/dashboard", dashboardRouter);
 
 // ── MCP endpoint ─────────────────────────────────────────────────────────────
 app.post("/mcp", async (req, res) => {

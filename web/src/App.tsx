@@ -1,8 +1,10 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "./auth";
+import { Layout } from "./components/Layout";
 import { Login } from "./pages/Login";
 import { Forgot } from "./pages/Forgot";
 import { Reset } from "./pages/Reset";
+import { Dashboard } from "./pages/Dashboard";
 import { Bilag } from "./pages/Bilag";
 
 export function App() {
@@ -15,7 +17,11 @@ export function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/forgot" element={<Forgot />} />
       <Route path="/reset" element={<Reset />} />
-      <Route path="/" element={<Protected><Bilag /></Protected>} />
+      <Route element={<Protected><Layout /></Protected>}>
+        <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/bilag" element={<Bilag />} />
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+      </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

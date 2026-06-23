@@ -1,6 +1,16 @@
 # Claude Code local settings (machine-specific)
 .claude/settings.local.json
 
+# Node
+node_modules/
+dist/
+*.log
+npm-debug.log*
+
+# Secrets / local env
+.env
+.env.local
+
 # OS / editor cruft
 Thumbs.db
 .DS_Store

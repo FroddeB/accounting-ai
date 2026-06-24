@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { FileUp, Loader2, Save, Sparkles, Trash2, Wallet, X } from "lucide-react";
+import { CheckCircle2, FileUp, Loader2, Save, Sparkles, Trash2, Wallet, X } from "lucide-react";
 
 export interface Department { id: string; name?: string }
 interface Ref { id: string; name?: string; title?: string; class?: string; active?: boolean; frequency?: string; code?: string }
@@ -31,7 +31,7 @@ interface Form {
   salaryTypeID: string; monthlySalary: string;
   weeklyHours: string; workDaysPerWeek: string;
   leaveTypeID: string; vacationDays: string;
-  lunchAmount: string;
+  lunchAmount: string; lunchType: string; // "Lunch" (per period) | "Lunch Daily" (per day)
 }
 
 const EMPTY: Form = {
@@ -41,11 +41,21 @@ const EMPTY: Form = {
   paySlipMitDK: true, paySlipEMail: true, paySlipEBoks: false, paySlipSMS: false,
   position: "", employmentPositionID: "", startDate: "", productionUnitID: "", salaryCycleID: "",
   salaryTypeID: "", monthlySalary: "", weeklyHours: "", workDaysPerWeek: "",
-  leaveTypeID: "", vacationDays: "", lunchAmount: "",
+  leaveTypeID: "", vacationDays: "", lunchAmount: "", lunchType: "Lunch",
 };
 
 const AFFILIATIONS = ["Standard", "Director", "MajorityShareholder", "Freelancer"];
 const discoLabel = (p: Ref) => `${p.title ?? p.id}${p.code ? ` (${p.code})` : ""}`;
+
+// Salary's "not ready" reason can be a string or an error object — render something useful.
+function fmtReady(e: unknown): string {
+  if (e == null) return "missing required fields";
+  if (typeof e === "string") return e;
+  const o = e as { message?: string; error?: string; errors?: unknown };
+  if (o.message) return o.message;
+  if (o.error) return o.error;
+  try { return JSON.stringify(e); } catch { return "missing required fields"; }
+}
 
 export function EmployeeEditor({
   employeeId, departments, aiEnabled, onClose, onSaved,
@@ -64,6 +74,7 @@ export function EmployeeEditor({
   const [saving, setSaving] = useState(false);
   const [settingUp, setSettingUp] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [readying, setReadying] = useState(false);
   const [ref, setRef] = useState<Reference | null>(null);
   const [lunchOn, setLunchOn] = useState(false);
 
@@ -121,6 +132,7 @@ export function EmployeeEditor({
           leaveTypeID: k.leaveTypeID ?? f.leaveTypeID,
           vacationDays: k.vacationDays != null ? String(k.vacationDays) : f.vacationDays,
           lunchAmount: k.lunchAmount != null ? String(k.lunchAmount) : f.lunchAmount,
+          lunchType: k.lunchType ?? f.lunchType,
         }));
       })
       .catch((err) => toast.error((err as ApiError).message))
@@ -197,7 +209,7 @@ export function EmployeeEditor({
       salaryTypeID: form.salaryTypeID, monthlySalary: form.monthlySalary,
       weeklyHours: form.weeklyHours, workDaysPerWeek: form.workDaysPerWeek,
       leaveTypeID: form.leaveTypeID, vacationDays: form.vacationDays,
-      lunchAmount: lunchOn ? form.lunchAmount : "",
+      lunchAmount: lunchOn ? form.lunchAmount : "", lunchType: form.lunchType,
     };
   }
 
@@ -213,13 +225,14 @@ export function EmployeeEditor({
         return;
       }
       const res = await api.post("/api/salary/employees/full", { employee: masterPayload(), contract: contractPayload() });
-      if (res.ok) {
-        toast.success("Draft employee created in Salary.dk ✓");
-        onSaved();
+      if (res.ok && res.ready) {
+        toast.success("Employee created and marked ready for payroll ✓");
+      } else if (res.ok) {
+        toast.warning(`Created, but still a draft — Salary needs: ${fmtReady(res.readyError)}`, { duration: 12000 });
       } else {
         toast.error(`Employee created, but salary wasn't set: ${res.error}`);
-        onSaved();
       }
+      onSaved();
     } catch (e) {
       toast.error((e as ApiError).message);
     } finally {
@@ -247,13 +260,29 @@ export function EmployeeEditor({
     if (!employeeId) return;
     setSettingUp(true);
     try {
-      await api.post(`/api/salary/employees/${employeeId}/contract`, { contract: contractPayload() });
-      toast.success("Employment & contract created in Salary.dk ✓");
+      const res = await api.post(`/api/salary/employees/${employeeId}/contract`, { contract: contractPayload() });
+      if (res.ready) toast.success("Salary & contract saved — employee is ready for payroll ✓");
+      else toast.warning(`Contract saved, but still a draft — Salary needs: ${fmtReady(res.readyError)}`, { duration: 12000 });
       onSaved();
     } catch (e) {
       toast.error((e as ApiError).message);
     } finally {
       setSettingUp(false);
+    }
+  }
+
+  // Edit only: retry taking an already-complete employee out of draft.
+  async function markReady() {
+    if (!employeeId) return;
+    setReadying(true);
+    try {
+      const res = await api.post(`/api/salary/employees/${employeeId}/ready`);
+      if (res.ready) { toast.success("Employee marked ready for payroll ✓"); onSaved(); }
+      else toast.warning(`Still a draft — Salary needs: ${fmtReady(res.readyError)}`, { duration: 12000 });
+    } catch (e) {
+      toast.error((e as ApiError).message);
+    } finally {
+      setReadying(false);
     }
   }
 
@@ -357,8 +386,17 @@ export function EmployeeEditor({
                   Frokostordning (lunch scheme)
                 </label>
                 {lunchOn && (
-                  <Input type="number" placeholder="Net deduction per period (kr.)"
-                    value={form.lunchAmount} onChange={(e) => set("lunchAmount")(e.target.value)} />
+                  <div className="flex gap-2">
+                    <Input type="number" placeholder="Net deduction (kr.)"
+                      value={form.lunchAmount} onChange={(e) => set("lunchAmount")(e.target.value)} />
+                    <Select value={form.lunchType} onValueChange={set("lunchType")}>
+                      <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Lunch">per periode</SelectItem>
+                        <SelectItem value="Lunch Daily">per day</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 )}
               </div>
             </Section>
@@ -381,9 +419,15 @@ export function EmployeeEditor({
                 {isEdit ? "Save details" : "Create draft employee"}
               </Button>
               {isEdit && (
-                <Button variant="secondary" onClick={setupPayroll} disabled={saving || settingUp}>
+                <Button variant="secondary" onClick={setupPayroll} disabled={saving || settingUp || readying}>
                   {settingUp ? <Loader2 className="size-4 animate-spin" /> : <Wallet className="size-4" />}
                   Save salary &amp; contract
+                </Button>
+              )}
+              {isEdit && (
+                <Button variant="outline" onClick={markReady} disabled={saving || settingUp || readying}>
+                  {readying ? <Loader2 className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />}
+                  Mark ready for payroll
                 </Button>
               )}
               <Button variant="ghost" onClick={onClose}>Cancel</Button>

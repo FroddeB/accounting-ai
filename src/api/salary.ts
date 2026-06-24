@@ -94,6 +94,8 @@ async function setupContract(employeeId: string, c: Record<string, unknown>, act
   const leaveTypeID = str(c.leaveTypeID);
   const vacationDays = num(c.vacationDays);
   const lunchAmount = num(c.lunchAmount);
+  // "Lunch" = per period, "Lunch Daily" = per day.
+  const lunchType = str(c.lunchType) === "Lunch Daily" ? "Lunch Daily" : "Lunch";
 
   const contract = await salary.createEmployeeContract({
     employmentID,
@@ -108,7 +110,7 @@ async function setupContract(employeeId: string, c: Record<string, unknown>, act
     workDaysPerWeek: num(c.workDaysPerWeek),
     salary: salaryTypeID && monthlySalary != null ? [{ salaryTypeID, rate: monthlySalary }] : [],
     leave: leaveTypeID && vacationDays != null ? [{ typeID: leaveTypeID, days: vacationDays }] : [],
-    benefits: lunchAmount != null ? [{ type: "Lunch", amount: lunchAmount, title: "Frokostordning" }] : [],
+    benefits: lunchAmount != null ? [{ type: lunchType, amount: lunchAmount, title: "Frokostordning" }] : [],
   });
 
   await recordAudit({
@@ -116,7 +118,23 @@ async function setupContract(employeeId: string, c: Record<string, unknown>, act
     request: { employeeId, contract: c },
     response: { employmentID, contractID: contract.id }, status: "success",
   });
-  return { employmentID, contractID: contract.id };
+
+  // Try to take the employee out of kladde (draft) and make them payroll-ready.
+  // A 400 means Salary still wants something — pass the reason back so the user sees it.
+  let ready = false;
+  let readyError: unknown;
+  try {
+    await salary.markReady(employeeId);
+    ready = true;
+  } catch (e) {
+    readyError = e instanceof SalaryApiError ? e.body : (e instanceof Error ? e.message : String(e));
+  }
+  await recordAudit({
+    actor, toolName: "salary.employee_ready",
+    request: { employeeId }, response: { ready, readyError }, status: ready ? "success" : "error",
+  });
+
+  return { employmentID, contractID: contract.id, ready, readyError };
 }
 
 function handle(res: import("express").Response, err: unknown, what: string): void {
@@ -227,7 +245,7 @@ salaryRouter.get("/employees/:id/contract", async (req, res) => {
     }
     const sal = c.remuneration?.salary?.[0];
     const lv = c.remuneration?.leave?.[0];
-    const lunch = c.remuneration?.benefits?.find((b) => b.type === "Lunch");
+    const lunch = c.remuneration?.benefits?.find((b) => b.type === "Lunch" || b.type === "Lunch Daily");
     res.json({
       hasContract: true,
       position: c.position ?? null,
@@ -241,6 +259,7 @@ salaryRouter.get("/employees/:id/contract", async (req, res) => {
       leaveTypeID: lv?.typeID ?? null,
       vacationDays: lv?.days ?? null,
       lunchAmount: lunch?.amount ?? null,
+      lunchType: lunch?.type ?? null,
       validFrom: c.validFrom ?? null,
     });
   } catch (err) {
@@ -344,6 +363,30 @@ salaryRouter.post("/employees/:id/contract", async (req: AuthedRequest, res) => 
       response: { error: err instanceof SalaryApiError ? err.body : String(err) }, status: "error",
     });
     handle(res, err, "setup-contract");
+  }
+});
+
+// Mark an existing employee ready for payroll (take them out of kladde).
+salaryRouter.post("/employees/:id/ready", async (req: AuthedRequest, res) => {
+  const id = String(req.params.id);
+  try {
+    await salary.markReady(id);
+    await recordAudit({
+      actor: req.user!.email, toolName: "salary.employee_ready",
+      request: { id }, response: { ready: true }, status: "success",
+    });
+    res.json({ ok: true, ready: true });
+  } catch (err) {
+    await recordAudit({
+      actor: req.user!.email, toolName: "salary.employee_ready",
+      request: { id }, response: { error: err instanceof SalaryApiError ? err.body : String(err) }, status: "error",
+    });
+    if (err instanceof SalaryApiError) {
+      // Surface Salary's reason (which fields are still missing) to the UI.
+      res.json({ ok: false, ready: false, readyError: err.body });
+    } else {
+      handle(res, err, "mark-ready");
+    }
   }
 });
 

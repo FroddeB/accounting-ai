@@ -338,6 +338,10 @@ export const salary = {
   deleteEmployee: (id: string) =>
     send<unknown>("DELETE", `/v2/employees/${encodeURIComponent(id)}?removeOrphans=true`),
 
+  /** Mark an employee ready for payroll (out of kladde). Throws 400 listing missing fields. */
+  markReady: (id: string) =>
+    send<{ data: SalaryEmployee }>("POST", `/v2/employees/${encodeURIComponent(id)}/ready`),
+
   // ── Reference lists (for mapping a contract's terms to company-specific IDs) ──
   listSalaryTypes: async () =>
     get<Page<SalaryType>>("/v2/salaryTypes", { companyID: await companyId(), limit: 200 }),

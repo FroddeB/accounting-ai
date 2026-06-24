@@ -41,6 +41,8 @@ export const config = {
   salary: {
     apiKey: process.env.SALARY_API_KEY ?? "",
     base: optional("SALARY_API_BASE", "https://api.salary.dk"),
+    /** Optional — scopes list endpoints to one company when the key spans several. */
+    companyId: process.env.SALARY_COMPANY_ID ?? "",
   },
 
   /** When true, write tools simulate and record a dry_run audit entry instead of mutating. */

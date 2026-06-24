@@ -1,7 +1,7 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../auth";
 import { Button } from "@/components/ui/button";
-import { Clock, LayoutDashboard, Paperclip, Sparkles, Users } from "lucide-react";
+import { Banknote, Clock, LayoutDashboard, Paperclip, Sparkles, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export function Layout() {
@@ -20,6 +20,7 @@ export function Layout() {
           <NavLink to="/dashboard" className={link}><LayoutDashboard className="size-4" /> Dashboard</NavLink>
           <NavLink to="/invoices" className={link}><Sparkles className="size-4" /> Invoices</NavLink>
           <NavLink to="/bilag" className={link}><Paperclip className="size-4" /> Bilag</NavLink>
+          <NavLink to="/salary" className={link}><Banknote className="size-4" /> Salary</NavLink>
           <NavLink to="/history" className={link}><Clock className="size-4" /> History</NavLink>
           {user?.admin && <NavLink to="/team" className={link}><Users className="size-4" /> Team</NavLink>}
           <div className="flex-1" />

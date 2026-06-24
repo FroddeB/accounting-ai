@@ -9,6 +9,7 @@ import { Bilag } from "./pages/Bilag";
 import { Invoices } from "./pages/Invoices";
 import { History } from "./pages/History";
 import { Team } from "./pages/Team";
+import { Salary } from "./pages/Salary";
 
 export function App() {
   const { loading } = useAuth();
@@ -24,6 +25,7 @@ export function App() {
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/invoices" element={<Invoices />} />
         <Route path="/bilag" element={<Bilag />} />
+        <Route path="/salary" element={<Salary />} />
         <Route path="/history" element={<History />} />
         <Route path="/team" element={<Team />} />
         <Route path="/" element={<Navigate to="/dashboard" replace />} />

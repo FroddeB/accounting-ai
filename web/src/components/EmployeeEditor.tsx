@@ -47,14 +47,10 @@ const EMPTY: Form = {
 const AFFILIATIONS = ["Standard", "Director", "MajorityShareholder", "Freelancer"];
 const discoLabel = (p: Ref) => `${p.title ?? p.id}${p.code ? ` (${p.code})` : ""}`;
 
-// Salary's "not ready" reason can be a string or an error object — render something useful.
+// Salary's "not ready" reason is already formatted by the backend.
 function fmtReady(e: unknown): string {
-  if (e == null) return "missing required fields";
   if (typeof e === "string") return e;
-  const o = e as { message?: string; error?: string; errors?: unknown };
-  if (o.message) return o.message;
-  if (o.error) return o.error;
-  try { return JSON.stringify(e); } catch { return "missing required fields"; }
+  return "missing required fields";
 }
 
 export function EmployeeEditor({

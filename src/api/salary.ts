@@ -97,21 +97,26 @@ async function setupContract(employeeId: string, c: Record<string, unknown>, act
   // "Lunch" = per period, "Lunch Daily" = per day.
   const lunchType = str(c.lunchType) === "Lunch Daily" ? "Lunch Daily" : "Lunch";
 
-  const contract = await salary.createEmployeeContract({
-    employmentID,
-    productionUnitID,
-    salaryCycleID,
-    validFrom: startDate,
-    position: str(c.position),
-    employmentPositionID: str(c.employmentPositionID),
-    departmentID: str(c.departmentID),
-    employmentType: str(c.employmentType) || "Ordinary",
-    weeklyHours: num(c.weeklyHours),
-    workDaysPerWeek: num(c.workDaysPerWeek),
-    salary: salaryTypeID && monthlySalary != null ? [{ salaryTypeID, rate: monthlySalary }] : [],
-    leave: leaveTypeID && vacationDays != null ? [{ typeID: leaveTypeID, days: vacationDays }] : [],
-    benefits: lunchAmount != null ? [{ type: lunchType, amount: lunchAmount, title: "Frokostordning" }] : [],
-  });
+  try {
+    var contract = await salary.createEmployeeContract({
+      employmentID,
+      productionUnitID,
+      salaryCycleID,
+      validFrom: startDate,
+      position: str(c.position),
+      employmentPositionID: str(c.employmentPositionID),
+      departmentID: str(c.departmentID),
+      employmentType: str(c.employmentType) || "Ordinary",
+      weeklyHours: num(c.weeklyHours),
+      workDaysPerWeek: num(c.workDaysPerWeek),
+      salary: salaryTypeID && monthlySalary != null ? [{ salaryTypeID, rate: monthlySalary }] : [],
+      leave: leaveTypeID && vacationDays != null ? [{ typeID: leaveTypeID, days: vacationDays }] : [],
+      benefits: lunchAmount != null ? [{ type: lunchType, amount: lunchAmount, title: "Frokostordning" }] : [],
+    });
+  } catch (e) {
+    console.error("[salary] contract creation 400 detail:", JSON.stringify(e instanceof SalaryApiError ? e.body : e, null, 2));
+    throw e;
+  }
 
   await recordAudit({
     actor, toolName: "salary.contract_create",

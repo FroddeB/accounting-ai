@@ -5,10 +5,11 @@ import { getClient, mediaBlock } from "./anthropic.js";
 /**
  * Claude-powered employment-contract reading.
  *
- * Given an uploaded employment contract (PDF/image), Claude extracts the employee
- * master-data fields needed to draft a new Salary.dk employee. Salary/pay figures are
- * extracted too, but only for the human to see — they are NOT written automatically
- * (remuneration lives in a separate entity and moving money stays out of scope).
+ * Given an uploaded employment contract (PDF/image), Claude extracts the fields needed
+ * to draft a new Salary.dk employee — both the master record AND the contract terms
+ * (salary, hours, vacation, lunch scheme). The human reviews everything, maps the pay
+ * components to the company's salary types, and saves. Per-occurrence supplements
+ * (e.g. weekend bonus) and pension are intentionally NOT extracted — handled elsewhere.
  */
 
 export interface ContractExtraction {
@@ -26,8 +27,15 @@ export interface ContractExtraction {
   jobTitle: string | null;
   departmentName: string | null; // free-text hint; the user maps it to a department
   startDate: string | null;      // ISO 8601 if determinable
-  // For reference only — shown to the user, never written.
-  salaryDescription: string | null; // e.g. "32.000 DKK/month" or "190 DKK/hour + pension 5%"
+  // Contract / remuneration terms
+  monthlySalary: number | null;     // base monthly salary (Grundløn), DKK
+  payFrequency: "Monthly" | "BiWeekly" | "Weekly" | null;
+  weeklyHours: number | null;       // e.g. 37
+  workDaysPerWeek: number | null;   // e.g. 5
+  isFullTime: boolean | null;       // Fastlønnet (fuldtid)
+  vacationDaysPerYear: number | null; // 5 weeks → 25
+  hasLunchScheme: boolean;          // frokostordning mentioned
+  lunchNetDeductionPerPeriod: number | null; // DKK net deduction per period, if stated
   summary: string;
 }
 
@@ -53,16 +61,22 @@ const SCHEMA = {
     jobTitle: { type: ["string", "null"] },
     departmentName: { type: ["string", "null"], description: "Department/team named in the contract, if any" },
     startDate: { type: ["string", "null"], description: "Employment start date, ISO 8601 (YYYY-MM-DD)" },
-    salaryDescription: {
-      type: ["string", "null"],
-      description: "Human-readable pay summary (amount, period, pension, etc.) — for reference only",
-    },
+    monthlySalary: { type: ["number", "null"], description: "Base monthly gross salary (Grundløn) in DKK, e.g. 50000" },
+    payFrequency: { type: ["string", "null"], enum: ["Monthly", "BiWeekly", "Weekly", null], description: "How often salary is paid" },
+    weeklyHours: { type: ["number", "null"], description: "Average weekly working hours, e.g. 37" },
+    workDaysPerWeek: { type: ["number", "null"], description: "Number of work days in a normal week, e.g. 5" },
+    isFullTime: { type: ["boolean", "null"], description: "True if the contract is full-time (fuldtid)" },
+    vacationDaysPerYear: { type: ["number", "null"], description: "Paid vacation days per year. Convert weeks to days: 5 weeks = 25 days" },
+    hasLunchScheme: { type: "boolean", description: "True if a lunch scheme (frokostordning) is mentioned" },
+    lunchNetDeductionPerPeriod: { type: ["number", "null"], description: "Employee net deduction per period for the lunch scheme in DKK, only if explicitly stated" },
     summary: { type: "string", description: "One-line human summary of the contract" },
   },
   required: [
     "name", "email", "phoneNumber", "address", "postalCode", "city", "nationalID",
     "bankRegistrationNumber", "bankAccountNumber", "affiliationType", "language",
-    "jobTitle", "departmentName", "startDate", "salaryDescription", "summary",
+    "jobTitle", "departmentName", "startDate", "monthlySalary", "payFrequency",
+    "weeklyHours", "workDaysPerWeek", "isFullTime", "vacationDaysPerYear",
+    "hasLunchScheme", "lunchNetDeductionPerPeriod", "summary",
   ],
 } as const;
 
@@ -71,8 +85,11 @@ You receive an employment contract (often in Danish) and must extract the fields
 create the employee's master record. Extract exactly what the document states — never invent a
 CPR number, bank details or address. Leave a field null if it isn't in the document.
 Danish contracts: "Tiltrædelse"/"Startdato" = start date; "Reg.nr." + "Kontonr." = bank reg. +
-account number; CPR is the national ID. Capture pay terms in salaryDescription as free text
-(it is shown to a human, not used to set pay).`;
+account number; CPR is the national ID. For pay: "Lønnen udgør … kr. pr. måned" = monthlySalary
+and payFrequency Monthly; "37 timer om ugen" = weeklyHours 37; "5 ugers ferie" = vacationDaysPerYear
+25 (5 weeks × 5 days); a "frokostordning" sets hasLunchScheme true (only fill
+lunchNetDeductionPerPeriod if an explicit kr. amount is given). Do NOT extract weekend/holiday
+supplements or pension — those are handled separately.`;
 
 export async function extractEmployeeFromContract(
   bytes: Buffer,

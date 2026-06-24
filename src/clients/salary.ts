@@ -159,6 +159,37 @@ export interface SalaryEmployee {
   onboardingState?: string;
 }
 
+// ── Reference data (company-specific IDs the contract/remuneration reference) ──
+export interface SalaryType { id: string; name?: string; title?: string; class?: string; active?: boolean }
+export interface SalaryCycle { id: string; frequency?: string; prepaid?: boolean }
+export interface LeaveType { id: string; name?: string; class?: string; assignable?: boolean; payoutType?: string; unit?: string }
+export interface ProductionUnit { id: string; name?: string; productionUnitNumber?: string; active?: boolean }
+
+export interface EmploymentInput {
+  employeeID: string;
+  employeeNumber: number;
+  startDate: string;
+  preferredTaxCardType?: string; // Primary | Secondary
+  incomeType?: string;           // DKSalaryIncome, ...
+}
+
+/** The remuneration + contract terms for a new employee (salary, hours, vacation, lunch). */
+export interface ContractInput {
+  employmentID: string;
+  productionUnitID: string;
+  salaryCycleID: string;
+  validFrom: string;
+  position?: string;
+  departmentID?: string;
+  employmentType?: string;       // Ordinary | Freelance
+  workDaysPerWeek?: number;      // builds workCycle (Mon..)
+  weeklyHours?: number;          // workCycleHours
+  salary?: { salaryTypeID: string; rate: number }[];
+  leave?: { typeID: string; days: number }[];
+  /** Personalegoder, e.g. { type: "Lunch", amount: 20, title: "Frokostordning" }. */
+  benefits?: { type: string; amount?: number; title?: string }[];
+}
+
 /** Editable master-data fields we accept from the UI (no salary/remuneration). */
 export interface SalaryEmployeeInput {
   name?: string;
@@ -259,5 +290,64 @@ export const salary = {
       `/v2/employees/${encodeURIComponent(id)}`,
       patch,
     )).data;
+  },
+
+  // ── Reference lists (for mapping a contract's terms to company-specific IDs) ──
+  listSalaryTypes: async () =>
+    get<Page<SalaryType>>("/v2/salaryTypes", { companyID: await companyId(), limit: 200 }),
+  listSalaryCycles: async () =>
+    get<Page<SalaryCycle>>("/v2/salaryCycles", { companyID: await companyId(), limit: 100 }),
+  listLeaveTypes: async () =>
+    get<Page<LeaveType>>("/v2/leaveTypes", { companyID: await companyId(), limit: 100 }),
+  listProductionUnits: async () => {
+    const c = await get<{ data?: { productionUnits?: ProductionUnit[] } }>(
+      `/v2/companies/${encodeURIComponent(await companyId())}`,
+    );
+    return c.data?.productionUnits ?? [];
+  },
+
+  /** Next free employee number (Salary requires one on the employment). */
+  nextEmployeeNumber: async () => {
+    const r = await get<Page<{ employeeNumber?: string | number }>>(
+      "/v2/employments", { companyID: await companyId(), limit: 500 },
+    );
+    const nums = (r.data ?? []).map((e) => Number(e.employeeNumber)).filter((n) => Number.isFinite(n));
+    return (nums.length ? Math.max(...nums) : 0) + 1;
+  },
+
+  createEmployment: async (input: EmploymentInput) =>
+    (await send<{ data: { id: string } }>("POST", "/v2/employments", clean({
+      employeeID: input.employeeID,
+      employeeNumber: input.employeeNumber,
+      startDate: input.startDate,
+      preferredTaxCardType: input.preferredTaxCardType || "Primary",
+      incomeType: input.incomeType || "DKSalaryIncome",
+    }))).data,
+
+  createEmployeeContract: async (input: ContractInput) => {
+    const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+    const days = Math.min(Math.max(input.workDaysPerWeek ?? 5, 1), 7);
+    const body = {
+      employmentID: input.employmentID,
+      productionUnitID: input.productionUnitID,
+      salaryCycleID: input.salaryCycleID,
+      validFrom: input.validFrom,
+      employmentType: input.employmentType || "Ordinary",
+      timeRegistrationMethodType: "Coarse",
+      salaryRegistrationMethodType: "Coarse",
+      ...(input.position ? { position: input.position } : {}),
+      ...(input.departmentID ? { departmentID: input.departmentID } : {}),
+      ...(input.weeklyHours ? { workCycleHours: [input.weeklyHours] } : {}),
+      workCycle: [WEEKDAYS.slice(0, days)],
+      // remuneration requires all five arrays present; default the unused ones to empty.
+      remuneration: {
+        salary: input.salary ?? [],
+        leave: input.leave ?? [],
+        benefits: input.benefits ?? [],
+        supplements: [],
+        pension: [],
+      },
+    };
+    return (await send<{ data: { id: string } }>("POST", "/v2/employeeContracts", body)).data;
   },
 };

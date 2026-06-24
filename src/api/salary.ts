@@ -177,7 +177,9 @@ async function setupContract(employeeId: string, c: Record<string, unknown>, act
     ready = true;
   } catch (e) {
     console.error("[salary] markReady failed for", employeeId, ":", JSON.stringify(e instanceof SalaryApiError ? e.body : e, null, 2));
-    readyError = e instanceof SalaryApiError ? fmtSalaryError(e.body) : (e instanceof Error ? e.message : String(e));
+    readyError = isUserSessionRequired(e)
+      ? "Everything is set — just open the employee in Salary.dk and click \"Klar til løn\" to finalize. (Salary requires a logged-in user for this final step; the API client can't do it.)"
+      : (e instanceof SalaryApiError ? fmtSalaryError(e.body) : (e instanceof Error ? e.message : String(e)));
   }
   await recordAudit({
     actor, toolName: "salary.employee_ready",
@@ -187,13 +189,20 @@ async function setupContract(employeeId: string, c: Record<string, unknown>, act
   return { employmentID, contractID: contract.id, ready, readyError };
 }
 
-// Format Salary.dk error objects into human-readable messages.
+// Format Salary.dk error objects into human-readable messages. Salary wraps errors as
+// { error: { message, type, details: [...] } } but also uses { message } and { errors: {...} }.
 function fmtSalaryError(e: unknown): string {
-  console.log("[salary] fmtSalaryError input:", JSON.stringify(e, null, 2));
   if (typeof e === "string") return e;
   const o = e as any;
+  // Nested { error: { message, details } } form.
+  if (o.error && typeof o.error === "object") {
+    const inner = o.error;
+    const details = Array.isArray(inner.details) ? inner.details.filter((d: unknown) => typeof d === "string" && d) : [];
+    if (details.length) return `${inner.message ?? "error"} (${details.join("; ")})`;
+    if (inner.message) return String(inner.message);
+  }
+  if (typeof o.error === "string") return o.error;
   if (o.message && typeof o.message === "string") return o.message;
-  if (o.error && typeof o.error === "string") return o.error;
   if (o.errors) {
     const msgs: string[] = [];
     for (const [k, v] of Object.entries(o.errors as any)) {
@@ -203,6 +212,14 @@ function fmtSalaryError(e: unknown): string {
     if (msgs.length > 0) return msgs.join("; ");
   }
   return JSON.stringify(e);
+}
+
+// Salary's mark-ready requires a logged-in *user* session; our API-client token has none,
+// so it 404s with "User Not Found". Detect that and explain the manual step.
+function isUserSessionRequired(e: unknown): boolean {
+  const body = e instanceof SalaryApiError ? e.body : e;
+  const msg = fmtSalaryError(body);
+  return /user not found/i.test(msg);
 }
 
 function handle(res: import("express").Response, err: unknown, what: string): void {
@@ -450,7 +467,10 @@ salaryRouter.post("/employees/:id/ready", async (req: AuthedRequest, res) => {
       request: { id }, response: { error: err instanceof SalaryApiError ? err.body : String(err) }, status: "error",
     });
     if (err instanceof SalaryApiError) {
-      res.json({ ok: false, ready: false, readyError: fmtSalaryError(err.body) });
+      const readyError = isUserSessionRequired(err)
+        ? "Everything is set — just open the employee in Salary.dk and click \"Klar til løn\" to finalize. (Salary requires a logged-in user for this final step; the API client can't do it.)"
+        : fmtSalaryError(err.body);
+      res.json({ ok: false, ready: false, readyError });
     } else {
       handle(res, err, "mark-ready");
     }

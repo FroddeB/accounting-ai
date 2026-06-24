@@ -92,10 +92,14 @@ async function setupContract(employeeId: string, c: Record<string, unknown>, act
   const salaryTypeID = str(c.salaryTypeID);
   const monthlySalary = num(c.monthlySalary);
   const leaveTypeID = str(c.leaveTypeID);
-  const vacationDays = num(c.vacationDays);
+  const vacationDays = num(c.vacationDays) ?? 25; // Default to 25 days per year
   const lunchAmount = num(c.lunchAmount);
   // "Lunch" = per period, "Lunch Daily" = per day.
   const lunchType = str(c.lunchType) === "Lunch Daily" ? "Lunch Daily" : "Lunch";
+  // Vacation scheme defaults: "Ferie med løn" (paid) with 1% allowance and Great Prayer Day supplement.
+  const ferieType = str(c.ferieType) || "Ferie med løn";
+  const ferietillæg = num(c.ferietillæg) ?? 1; // Default to 1%
+  const storeBededagstillæg = c.storeBededagstillæg !== false; // Default to true (enabled)
 
   try {
     var contract = await salary.createEmployeeContract({
@@ -112,6 +116,10 @@ async function setupContract(employeeId: string, c: Record<string, unknown>, act
       salary: salaryTypeID && monthlySalary != null ? [{ salaryTypeID, rate: monthlySalary }] : [],
       leave: leaveTypeID && vacationDays != null ? [{ typeID: leaveTypeID, days: vacationDays }] : [],
       benefits: lunchAmount != null ? [{ type: lunchType, amount: lunchAmount, title: "Frokostordning" }] : [],
+      vacationDays,
+      ferieType,
+      ferietillæg,
+      storeBededagstillæg,
     });
   } catch (e) {
     console.error("[salary] contract creation 400 detail:", JSON.stringify(e instanceof SalaryApiError ? e.body : e, null, 2));

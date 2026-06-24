@@ -214,6 +214,11 @@ export interface ContractInput {
   leave?: { typeID: string; days: number }[];
   /** Personalegoder, e.g. { type: "Lunch", amount: 20, title: "Frokostordning" }. */
   benefits?: { type: string; amount?: number; title?: string }[];
+  // Vacation scheme configuration
+  vacationDays?: number;         // Total vacation days per year (e.g. 25)
+  ferieType?: string;            // "Ferie med løn" | "Ferie uden løn" | "Direktørløn"
+  ferietillæg?: number;          // Vacation allowance percentage (e.g. 1 for 1%)
+  storeBededagstillæg?: boolean; // Great Prayer Day supplement enabled
 }
 
 /** Editable master-data fields we accept from the UI (no salary/remuneration). */
@@ -394,7 +399,7 @@ export const salary = {
   createEmployeeContract: async (input: ContractInput) => {
     const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
     const days = Math.min(Math.max(input.workDaysPerWeek ?? 5, 1), 7);
-    const body = {
+    const body: any = {
       employmentID: input.employmentID,
       productionUnitID: input.productionUnitID,
       salaryCycleID: input.salaryCycleID,
@@ -416,6 +421,11 @@ export const salary = {
         pension: [],
       },
     };
+    // Vacation scheme configuration (passed through if supplied).
+    if (input.ferieType) body.ferieType = input.ferieType;
+    if (input.ferietillæg != null) body.ferietillæg = input.ferietillæg;
+    if (input.storeBededagstillæg != null) body.storeBededagstillæg = input.storeBededagstillæg;
+    if (input.vacationDays != null) body.vacationDays = input.vacationDays;
     return (await send<{ data: { id: string } }>("POST", "/v2/employeeContracts", body)).data;
   },
 };

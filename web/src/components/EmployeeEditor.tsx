@@ -32,6 +32,8 @@ interface Form {
   weeklyHours: string; workDaysPerWeek: string;
   leaveTypeID: string; vacationDays: string;
   lunchAmount: string; lunchType: string; // "Lunch" (per period) | "Lunch Daily" (per day)
+  // vacation scheme
+  ferieType: string; ferietillæg: string; storeBededagstillæg: boolean;
 }
 
 const EMPTY: Form = {
@@ -41,7 +43,8 @@ const EMPTY: Form = {
   paySlipMitDK: true, paySlipEMail: true, paySlipEBoks: false, paySlipSMS: false,
   position: "", employmentPositionID: "", startDate: "", productionUnitID: "", salaryCycleID: "",
   salaryTypeID: "", monthlySalary: "", weeklyHours: "", workDaysPerWeek: "",
-  leaveTypeID: "", vacationDays: "", lunchAmount: "", lunchType: "Lunch",
+  leaveTypeID: "", vacationDays: "25", lunchAmount: "", lunchType: "Lunch",
+  ferieType: "Ferie med løn", ferietillæg: "1", storeBededagstillæg: true,
 };
 
 const AFFILIATIONS = ["Standard", "Director", "MajorityShareholder", "Freelancer"];
@@ -129,6 +132,9 @@ export function EmployeeEditor({
           vacationDays: k.vacationDays != null ? String(k.vacationDays) : f.vacationDays,
           lunchAmount: k.lunchAmount != null ? String(k.lunchAmount) : f.lunchAmount,
           lunchType: k.lunchType ?? f.lunchType,
+          ferieType: k.ferieType ?? f.ferieType,
+          ferietillæg: k.ferietillæg != null ? String(k.ferietillæg) : f.ferietillæg,
+          storeBededagstillæg: k.storeBededagstillæg != null ? k.storeBededagstillæg : f.storeBededagstillæg,
         }));
       })
       .catch((err) => toast.error((err as ApiError).message))
@@ -206,6 +212,7 @@ export function EmployeeEditor({
       weeklyHours: form.weeklyHours, workDaysPerWeek: form.workDaysPerWeek,
       leaveTypeID: form.leaveTypeID, vacationDays: form.vacationDays,
       lunchAmount: lunchOn ? form.lunchAmount : "", lunchType: form.lunchType,
+      ferieType: form.ferieType, ferietillæg: form.ferietillæg, storeBededagstillæg: form.storeBededagstillæg,
     };
   }
 
@@ -381,6 +388,19 @@ export function EmployeeEditor({
               <FieldSelect label="Vacation type (Ferie)" value={form.leaveTypeID} onChange={set("leaveTypeID")}
                 options={(ref?.leaveTypes ?? []).map((l) => ({ value: l.id, label: l.name ?? l.id }))} placeholder="—" />
               <FieldInput label="Vacation days/year" value={form.vacationDays} onChange={set("vacationDays")} type="number" />
+              <FieldSelect label="Vacation scheme (Ferie type)" value={form.ferieType} onChange={set("ferieType")}
+                options={[
+                  { value: "Ferie med løn", label: "Ferie med løn (with allowance)" },
+                  { value: "Ferie uden løn", label: "Ferie uden løn (unpaid)" },
+                  { value: "Direktørløn", label: "Direktørløn (director)" },
+                ]} placeholder="—" />
+              <FieldInput label="Vacation allowance (%)" value={form.ferietillæg} onChange={set("ferietillæg")} type="number" />
+              <div className="grid gap-1.5">
+                <label className="flex items-center gap-2 text-sm font-medium">
+                  <input type="checkbox" checked={form.storeBededagstillæg} onChange={(e) => set("storeBededagstillæg")(e.target.checked)} />
+                  Store Bededagstillæg (Great Prayer Day supplement)
+                </label>
+              </div>
               <div className="grid gap-1.5">
                 <label className="flex items-center gap-2 text-sm font-medium">
                   <input type="checkbox" checked={lunchOn} onChange={(e) => setLunchOn(e.target.checked)} />

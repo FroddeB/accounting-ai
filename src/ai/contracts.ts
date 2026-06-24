@@ -96,28 +96,45 @@ export async function extractEmployeeFromContract(
   mimetype: string,
 ): Promise<ContractExtraction> {
   const anthropic = getClient();
-  const res = await anthropic.messages.create({
-    model: config.anthropic.model,
-    max_tokens: 2048,
-    system: SYSTEM,
-    tools: [
-      {
-        name: "record_employee",
-        description: "Record the employee master-data fields extracted from the contract.",
-        input_schema: SCHEMA as unknown as Anthropic.Tool.InputSchema,
-      },
-    ],
-    tool_choice: { type: "tool", name: "record_employee" },
-    messages: [
-      {
-        role: "user",
-        content: [
-          mediaBlock(bytes, mimetype),
-          { type: "text", text: "Extract the employee details from this employment contract." },
-        ],
-      },
-    ],
-  });
+
+  // Try primary model first, fall back to haiku on 529 (overload).
+  let model = config.anthropic.model;
+  const createRequest = async (m: string) => {
+    return anthropic.messages.create({
+      model: m,
+      max_tokens: 2048,
+      system: SYSTEM,
+      tools: [
+        {
+          name: "record_employee",
+          description: "Record the employee master-data fields extracted from the contract.",
+          input_schema: SCHEMA as unknown as Anthropic.Tool.InputSchema,
+        },
+      ],
+      tool_choice: { type: "tool", name: "record_employee" },
+      messages: [
+        {
+          role: "user",
+          content: [
+            mediaBlock(bytes, mimetype),
+            { type: "text", text: "Extract the employee details from this employment contract." },
+          ],
+        },
+      ],
+    });
+  };
+
+  let res;
+  try {
+    res = await createRequest(model);
+  } catch (err: any) {
+    if (err?.status === 529 && model !== "claude-haiku-4-5") {
+      console.warn("[anthropic] primary model overloaded, falling back to haiku");
+      res = await createRequest("claude-haiku-4-5");
+    } else {
+      throw err;
+    }
+  }
 
   const toolUse = res.content.find((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");
   if (!toolUse) throw new Error("Claude did not return structured contract data");

@@ -134,35 +134,50 @@ export async function extractAndMatch(
           .map((c) => `- voucherId=${c.voucherId} #${c.voucherNumber} date=${c.date ?? "?"} amount=${c.amount ?? "?"} text=${JSON.stringify(c.text ?? "")}`)
           .join("\n");
 
-  // Force Claude to return structured data by calling a single tool whose input
-  // schema is our result shape (strict = guaranteed-valid input).
-  const res = await anthropic.messages.create({
-    model: config.anthropic.model,
-    max_tokens: 4096,
-    system: SYSTEM,
-    tools: [
-      {
-        name: "record_invoice_match",
-        description: "Record the extracted invoice fields and the matched voucher.",
-        input_schema: SCHEMA as unknown as Anthropic.Tool.InputSchema,
-      },
-    ],
-    tool_choice: { type: "tool", name: "record_invoice_match" },
-    messages: [
-      {
-        role: "user",
-        content: [
-          mediaBlock(bytes, mimetype),
-          {
-            type: "text",
-            text:
-              `Here are the draft vouchers currently missing a bilag:\n${candidateText}\n\n` +
-              `Extract the document and choose the best matching voucher.`,
-          },
-        ],
-      },
-    ],
-  });
+  // Try primary model first, fall back to haiku on 529 (overload).
+  let model = config.anthropic.model;
+  const createRequest = async (m: string) => {
+    const res = await anthropic.messages.create({
+      model: m,
+      max_tokens: 4096,
+      system: SYSTEM,
+      tools: [
+        {
+          name: "record_invoice_match",
+          description: "Record the extracted invoice fields and the matched voucher.",
+          input_schema: SCHEMA as unknown as Anthropic.Tool.InputSchema,
+        },
+      ],
+      tool_choice: { type: "tool", name: "record_invoice_match" },
+      messages: [
+        {
+          role: "user",
+          content: [
+            mediaBlock(bytes, mimetype),
+            {
+              type: "text",
+              text:
+                `Here are the draft vouchers currently missing a bilag:\n${candidateText}\n\n` +
+                `Extract the document and choose the best matching voucher.`,
+            },
+          ],
+        },
+      ],
+    });
+    return res;
+  };
+
+  let res;
+  try {
+    res = await createRequest(model);
+  } catch (err: any) {
+    if (err?.status === 529 && model !== "claude-haiku-4-5") {
+      console.warn("[anthropic] primary model overloaded, falling back to haiku");
+      res = await createRequest("claude-haiku-4-5");
+    } else {
+      throw err;
+    }
+  }
 
   const toolUse = res.content.find((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");
   if (!toolUse) throw new Error("Claude did not return a structured match");

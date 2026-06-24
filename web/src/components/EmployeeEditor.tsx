@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api, ApiError } from "../api";
 import { Button } from "@/components/ui/button";
@@ -8,13 +8,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { FileUp, Loader2, Save, Sparkles, X } from "lucide-react";
+import { FileUp, Loader2, Save, Sparkles, Wallet, X } from "lucide-react";
 
 export interface Department { id: string; name?: string }
-interface Ref { id: string; name?: string; title?: string; class?: string; active?: boolean; frequency?: string }
+interface Ref { id: string; name?: string; title?: string; class?: string; active?: boolean; frequency?: string; code?: string }
 interface Reference {
   salaryTypes: Ref[]; salaryCycles: Ref[]; leaveTypes: Ref[];
-  productionUnits: Ref[]; departments: Department[];
+  productionUnits: Ref[]; departments: Department[]; employmentPositions: Ref[];
 }
 
 interface Form {
@@ -23,8 +23,10 @@ interface Form {
   postalCode: string; city: string; nationalID: string;
   bankRegistrationNumber: string; bankAccountNumber: string;
   affiliationType: string; language: string; departmentID: string;
-  // contract / salary (create only)
-  position: string; startDate: string;
+  // payslip delivery (TRIN 2 Kommunikation)
+  paySlipMitDK: boolean; paySlipEMail: boolean; paySlipEBoks: boolean; paySlipSMS: boolean;
+  // contract / salary
+  position: string; employmentPositionID: string; startDate: string;
   productionUnitID: string; salaryCycleID: string;
   salaryTypeID: string; monthlySalary: string;
   weeklyHours: string; workDaysPerWeek: string;
@@ -36,12 +38,14 @@ const EMPTY: Form = {
   name: "", email: "", phoneNumber: "", address: "", postalCode: "", city: "",
   nationalID: "", bankRegistrationNumber: "", bankAccountNumber: "",
   affiliationType: "Standard", language: "da", departmentID: "",
-  position: "", startDate: "", productionUnitID: "", salaryCycleID: "",
+  paySlipMitDK: true, paySlipEMail: true, paySlipEBoks: false, paySlipSMS: false,
+  position: "", employmentPositionID: "", startDate: "", productionUnitID: "", salaryCycleID: "",
   salaryTypeID: "", monthlySalary: "", weeklyHours: "", workDaysPerWeek: "",
   leaveTypeID: "", vacationDays: "", lunchAmount: "",
 };
 
 const AFFILIATIONS = ["Standard", "Director", "MajorityShareholder", "Freelancer"];
+const discoLabel = (p: Ref) => `${p.title ?? p.id}${p.code ? ` (${p.code})` : ""}`;
 
 export function EmployeeEditor({
   employeeId, departments, aiEnabled, onClose, onSaved,
@@ -55,20 +59,19 @@ export function EmployeeEditor({
   const isEdit = employeeId !== null;
   const fileRef = useRef<HTMLInputElement>(null);
   const [form, setForm] = useState<Form>(EMPTY);
-  const [loading, setLoading] = useState(isEdit);
+  const [loading, setLoading] = useState(true);
   const [parsing, setParsing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [settingUp, setSettingUp] = useState(false);
   const [ref, setRef] = useState<Reference | null>(null);
   const [lunchOn, setLunchOn] = useState(false);
 
-  const set = (k: keyof Form) => (v: string) => setForm((f) => ({ ...f, [k]: v }));
+  const set = (k: keyof Form) => (v: string | boolean) => setForm((f) => ({ ...f, [k]: v }));
 
-  // Load reference data (salary types, cycles, etc.) for the contract form (create only).
+  // Reference data (salary types, cycles, DISCO-08 positions, …) for the contract form.
   useEffect(() => {
-    if (isEdit) return;
     api.get("/api/salary/employees/reference").then((r: Reference) => {
       setRef(r);
-      // Pre-select sensible defaults.
       const cycle = r.salaryCycles.find((c) => c.frequency === "Monthly") ?? r.salaryCycles[0];
       const fixed = r.salaryTypes.find((s) => s.active && s.class === "Fixed") ?? r.salaryTypes.find((s) => s.class === "Fixed");
       const ferie = r.leaveTypes.find((l) => /ferie|vacation/i.test(l.name ?? "")) ?? r.leaveTypes[0];
@@ -81,10 +84,10 @@ export function EmployeeEditor({
         productionUnitID: f.productionUnitID || pu?.id || "",
       }));
     }).catch((e) => toast.error(`Couldn't load Salary.dk config: ${(e as ApiError).message}`));
-  }, [isEdit]);
+  }, []);
 
   useEffect(() => {
-    if (!isEdit) return;
+    if (!isEdit) { setLoading(false); return; }
     api.get(`/api/salary/employees/${employeeId}`)
       .then((e) => setForm((f) => ({
         ...f,
@@ -94,10 +97,20 @@ export function EmployeeEditor({
         bankAccountNumber: e.bankAccountNumber ?? "",
         affiliationType: e.affiliationType || "Standard", language: e.language || "da",
         departmentID: e.departmentID ?? "",
+        paySlipMitDK: e.paySlipTransportMitDK ?? f.paySlipMitDK,
+        paySlipEMail: e.paySlipTransportEMail ?? f.paySlipEMail,
+        paySlipEBoks: e.paySlipTransportEBoks ?? f.paySlipEBoks,
+        paySlipSMS: e.paySlipTransportSMS ?? f.paySlipSMS,
       })))
       .catch((err) => toast.error((err as ApiError).message))
       .finally(() => setLoading(false));
   }, [employeeId, isEdit]);
+
+  const discoOptions = ref?.employmentPositions ?? [];
+  const discoCurrentLabel = useMemo(
+    () => discoOptions.find((p) => p.id === form.employmentPositionID),
+    [discoOptions, form.employmentPositionID],
+  );
 
   async function onContract(ev: React.ChangeEvent<HTMLInputElement>) {
     const file = ev.target.files?.[0];
@@ -108,7 +121,6 @@ export function EmployeeEditor({
       const dept = draft.departmentName
         ? departments.find((d) => (d.name ?? "").toLowerCase().includes(String(draft.departmentName).toLowerCase()))
         : undefined;
-      // Re-pick the monthly cycle if the contract specifies a different frequency.
       const cycleByFreq = draft.payFrequency
         ? ref?.salaryCycles.find((c) => c.frequency === draft.payFrequency)
         : undefined;
@@ -126,7 +138,6 @@ export function EmployeeEditor({
         affiliationType: draft.affiliationType ?? f.affiliationType,
         language: draft.language ?? f.language,
         departmentID: dept?.id ?? f.departmentID,
-        // contract terms
         position: draft.jobTitle ?? f.position,
         startDate: draft.startDate ?? f.startDate,
         monthlySalary: draft.monthlySalary != null ? String(draft.monthlySalary) : f.monthlySalary,
@@ -146,45 +157,67 @@ export function EmployeeEditor({
     }
   }
 
+  function masterPayload() {
+    return {
+      name: form.name, email: form.email, phoneNumber: form.phoneNumber, address: form.address,
+      postalCode: form.postalCode, city: form.city, nationalID: form.nationalID,
+      bankRegistrationNumber: form.bankRegistrationNumber, bankAccountNumber: form.bankAccountNumber,
+      affiliationType: form.affiliationType, language: form.language, departmentID: form.departmentID,
+      paySlipTransportMitDK: form.paySlipMitDK, paySlipTransportEMail: form.paySlipEMail,
+      paySlipTransportEBoks: form.paySlipEBoks, paySlipTransportSMS: form.paySlipSMS,
+    };
+  }
+  function contractPayload() {
+    return {
+      position: form.position, employmentPositionID: form.employmentPositionID,
+      startDate: form.startDate, departmentID: form.departmentID,
+      employmentType: form.affiliationType === "Freelancer" ? "Freelance" : "Ordinary",
+      productionUnitID: form.productionUnitID, salaryCycleID: form.salaryCycleID,
+      salaryTypeID: form.salaryTypeID, monthlySalary: form.monthlySalary,
+      weeklyHours: form.weeklyHours, workDaysPerWeek: form.workDaysPerWeek,
+      leaveTypeID: form.leaveTypeID, vacationDays: form.vacationDays,
+      lunchAmount: lunchOn ? form.lunchAmount : "",
+    };
+  }
+
+  // Create: master + contract in one call. Edit: PATCH master only.
   async function save() {
     if (!form.name.trim()) { toast.error("Name is required"); return; }
     setSaving(true);
     try {
-      const master = {
-        name: form.name, email: form.email, phoneNumber: form.phoneNumber, address: form.address,
-        postalCode: form.postalCode, city: form.city, nationalID: form.nationalID,
-        bankRegistrationNumber: form.bankRegistrationNumber, bankAccountNumber: form.bankAccountNumber,
-        affiliationType: form.affiliationType, language: form.language, departmentID: form.departmentID,
-      };
       if (isEdit) {
-        await api.patch(`/api/salary/employees/${employeeId}`, master);
-        toast.success("Employee updated ✓");
+        await api.patch(`/api/salary/employees/${employeeId}`, masterPayload());
+        toast.success("Employee details saved ✓");
         onSaved();
         return;
       }
-      const res = await api.post("/api/salary/employees/full", {
-        employee: master,
-        contract: {
-          position: form.position, startDate: form.startDate,
-          productionUnitID: form.productionUnitID, salaryCycleID: form.salaryCycleID,
-          salaryTypeID: form.salaryTypeID, monthlySalary: form.monthlySalary,
-          weeklyHours: form.weeklyHours, workDaysPerWeek: form.workDaysPerWeek,
-          leaveTypeID: form.leaveTypeID, vacationDays: form.vacationDays,
-          lunchAmount: lunchOn ? form.lunchAmount : "",
-        },
-      });
+      const res = await api.post("/api/salary/employees/full", { employee: masterPayload(), contract: contractPayload() });
       if (res.ok) {
         toast.success("Draft employee created in Salary.dk ✓");
         onSaved();
       } else {
-        // Employee created, but the salary/contract step failed.
-        toast.error(`Employee created as a draft, but salary wasn't set: ${res.error}`);
+        toast.error(`Employee created, but salary wasn't set: ${res.error}`);
         onSaved();
       }
     } catch (e) {
       toast.error((e as ApiError).message);
     } finally {
       setSaving(false);
+    }
+  }
+
+  // Edit only: create the employment + contract for a draft that has none yet.
+  async function setupPayroll() {
+    if (!employeeId) return;
+    setSettingUp(true);
+    try {
+      await api.post(`/api/salary/employees/${employeeId}/contract`, { contract: contractPayload() });
+      toast.success("Employment & contract created in Salary.dk ✓");
+      onSaved();
+    } catch (e) {
+      toast.error((e as ApiError).message);
+    } finally {
+      setSettingUp(false);
     }
   }
 
@@ -199,7 +232,7 @@ export function EmployeeEditor({
           <div className="grid place-items-center py-8 text-muted-foreground"><Loader2 className="size-5 animate-spin" /></div>
         ) : (
           <>
-            {aiEnabled && !isEdit && (
+            {aiEnabled && (
               <div>
                 <input ref={fileRef} type="file" accept=".pdf,image/*" hidden onChange={onContract} />
                 <button
@@ -215,7 +248,7 @@ export function EmployeeEditor({
               </div>
             )}
 
-            <Section title="Personal details">
+            <Section title="Personal details" icon={<Sparkles className="size-3.5" />}>
               <FieldInput label="Name" value={form.name} onChange={set("name")} required />
               <FieldInput label="Email" value={form.email} onChange={set("email")} type="email" />
               <FieldInput label="Phone" value={form.phoneNumber} onChange={set("phoneNumber")} />
@@ -238,52 +271,85 @@ export function EmployeeEditor({
               )}
             </Section>
 
-            {!isEdit && (
-              <Section title="Salary & contract">
-                <FieldInput label="Position" value={form.position} onChange={set("position")} />
-                <FieldInput label="Start date" value={form.startDate} onChange={set("startDate")} type="date" />
-                <FieldSelect label="Production unit (Arbejdssted)" value={form.productionUnitID} onChange={set("productionUnitID")}
-                  options={(ref?.productionUnits ?? []).map((p) => ({ value: p.id, label: p.name ?? p.id }))} placeholder="—" />
-                <FieldSelect label="Pay frequency (Udbetaling)" value={form.salaryCycleID} onChange={set("salaryCycleID")}
-                  options={(ref?.salaryCycles ?? []).map((c) => ({ value: c.id, label: c.frequency ?? c.id }))} placeholder="—" />
-                <FieldSelect label="Salary type (Løntype)" value={form.salaryTypeID} onChange={set("salaryTypeID")}
-                  options={(ref?.salaryTypes ?? []).filter((s) => s.active !== false).map((s) => ({ value: s.id, label: s.title ?? s.name ?? s.id }))} placeholder="—" />
-                <FieldInput label="Monthly salary (kr.)" value={form.monthlySalary} onChange={set("monthlySalary")} type="number" />
-                <div className="grid grid-cols-2 gap-3">
-                  <FieldInput label="Weekly hours" value={form.weeklyHours} onChange={set("weeklyHours")} type="number" />
-                  <FieldInput label="Work days/week" value={form.workDaysPerWeek} onChange={set("workDaysPerWeek")} type="number" />
-                </div>
-                <FieldSelect label="Vacation type (Ferie)" value={form.leaveTypeID} onChange={set("leaveTypeID")}
-                  options={(ref?.leaveTypes ?? []).map((l) => ({ value: l.id, label: l.name ?? l.id }))} placeholder="—" />
-                <FieldInput label="Vacation days/year" value={form.vacationDays} onChange={set("vacationDays")} type="number" />
+            <div className="grid gap-2">
+              <div className="text-sm font-medium">Payslip delivery</div>
+              <div className="flex flex-wrap gap-4 text-sm">
+                <Toggle label="mit.dk" checked={form.paySlipMitDK} onChange={(v) => set("paySlipMitDK")(v)} />
+                <Toggle label="e-mail" checked={form.paySlipEMail} onChange={(v) => set("paySlipEMail")(v)} />
+                <Toggle label="e-Boks" checked={form.paySlipEBoks} onChange={(v) => set("paySlipEBoks")(v)} />
+                <Toggle label="SMS" checked={form.paySlipSMS} onChange={(v) => set("paySlipSMS")(v)} />
+              </div>
+              <p className="text-xs text-muted-foreground">Foreign account (udenlandsk konto) is off by default.</p>
+            </div>
 
-                <div className="grid gap-1.5">
-                  <label className="flex items-center gap-2 text-sm font-medium">
-                    <input type="checkbox" checked={lunchOn} onChange={(e) => setLunchOn(e.target.checked)} />
-                    Frokostordning (lunch scheme)
-                  </label>
-                  {lunchOn && (
-                    <Input type="number" placeholder="Net deduction per period (kr.)"
-                      value={form.lunchAmount} onChange={(e) => set("lunchAmount")(e.target.value)} />
-                  )}
-                </div>
-              </Section>
-            )}
+            <Section title="Salary & contract" icon={<Wallet className="size-3.5" />}>
+              <FieldInput label="Job title" value={form.position} onChange={set("position")} />
+              <div className="grid gap-1.5">
+                <Label>Stilling (DISCO-08)</Label>
+                <input
+                  list="disco-list"
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
+                  placeholder="Search occupation code…"
+                  defaultValue={discoCurrentLabel ? discoLabel(discoCurrentLabel) : ""}
+                  onChange={(e) => {
+                    const hit = discoOptions.find((p) => discoLabel(p) === e.target.value);
+                    set("employmentPositionID")(hit?.id ?? "");
+                  }}
+                />
+                <datalist id="disco-list">
+                  {discoOptions.map((p) => <option key={p.id} value={discoLabel(p)} />)}
+                </datalist>
+              </div>
+              <FieldInput label="Start date" value={form.startDate} onChange={set("startDate")} type="date" />
+              <FieldSelect label="Production unit (Arbejdssted)" value={form.productionUnitID} onChange={set("productionUnitID")}
+                options={(ref?.productionUnits ?? []).map((p) => ({ value: p.id, label: p.name ?? p.id }))} placeholder="—" />
+              <FieldSelect label="Pay frequency (Udbetaling)" value={form.salaryCycleID} onChange={set("salaryCycleID")}
+                options={(ref?.salaryCycles ?? []).map((c) => ({ value: c.id, label: c.frequency ?? c.id }))} placeholder="—" />
+              <FieldSelect label="Salary type (Løntype)" value={form.salaryTypeID} onChange={set("salaryTypeID")}
+                options={(ref?.salaryTypes ?? []).filter((s) => s.active !== false).map((s) => ({ value: s.id, label: s.title ?? s.name ?? s.id }))} placeholder="—" />
+              <FieldInput label="Monthly salary (kr.)" value={form.monthlySalary} onChange={set("monthlySalary")} type="number" />
+              <div className="grid grid-cols-2 gap-3">
+                <FieldInput label="Weekly hours" value={form.weeklyHours} onChange={set("weeklyHours")} type="number" />
+                <FieldInput label="Work days/week" value={form.workDaysPerWeek} onChange={set("workDaysPerWeek")} type="number" />
+              </div>
+              <FieldSelect label="Vacation type (Ferie)" value={form.leaveTypeID} onChange={set("leaveTypeID")}
+                options={(ref?.leaveTypes ?? []).map((l) => ({ value: l.id, label: l.name ?? l.id }))} placeholder="—" />
+              <FieldInput label="Vacation days/year" value={form.vacationDays} onChange={set("vacationDays")} type="number" />
+              <div className="grid gap-1.5">
+                <label className="flex items-center gap-2 text-sm font-medium">
+                  <input type="checkbox" checked={lunchOn} onChange={(e) => setLunchOn(e.target.checked)} />
+                  Frokostordning (lunch scheme)
+                </label>
+                {lunchOn && (
+                  <Input type="number" placeholder="Net deduction per period (kr.)"
+                    value={form.lunchAmount} onChange={(e) => set("lunchAmount")(e.target.value)} />
+                )}
+              </div>
+            </Section>
 
-            {!isEdit ? (
-              <p className="text-xs text-muted-foreground">
-                Created as an <b>onboarding draft</b> in Salary.dk (employee → employment → contract).
-                Weekend/holiday supplements and pension are handled separately in Salary.dk.
-              </p>
+            {isEdit ? (
+              <div className="rounded-md border bg-muted/40 p-3 text-xs text-muted-foreground">
+                Use <b>Save details</b> for personal/payslip fields. Use <b>Create employment &amp; contract</b> only
+                if this employee has no salary/contract set up yet (it adds employment → contract via the API).
+              </div>
             ) : (
-              <p className="text-xs text-muted-foreground">Salary, hours and benefits are edited in Salary.dk.</p>
+              <p className="text-xs text-muted-foreground">
+                Created as an onboarding draft (employee → employment → contract). Weekend/holiday supplements and
+                pension are handled separately in Salary.dk.
+              </p>
             )}
 
-            <div className="flex gap-2">
-              <Button onClick={save} disabled={saving}>
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={save} disabled={saving || settingUp}>
                 {saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
-                {isEdit ? "Save changes" : "Create draft employee"}
+                {isEdit ? "Save details" : "Create draft employee"}
               </Button>
+              {isEdit && (
+                <Button variant="secondary" onClick={setupPayroll} disabled={saving || settingUp}>
+                  {settingUp ? <Loader2 className="size-4 animate-spin" /> : <Wallet className="size-4" />}
+                  Create employment &amp; contract
+                </Button>
+              )}
               <Button variant="ghost" onClick={onClose}>Cancel</Button>
             </div>
           </>
@@ -293,14 +359,21 @@ export function EmployeeEditor({
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, icon, children }: { title: string; icon: React.ReactNode; children: React.ReactNode }) {
   return (
     <div className="grid gap-4">
-      <div className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
-        <Sparkles className="size-3.5" /> {title}
-      </div>
+      <div className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">{icon} {title}</div>
       <div className="grid gap-4 sm:grid-cols-2">{children}</div>
     </div>
+  );
+}
+
+function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <label className="flex items-center gap-2">
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      {label}
+    </label>
   );
 }
 

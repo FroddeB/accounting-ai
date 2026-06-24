@@ -154,8 +154,14 @@ export interface SalaryEmployee {
   phoneNumberCountryCode?: string;
   language?: string;
   nationalID?: string;
+  nationalIDType?: string;
   bankRegistrationNumber?: string;
   bankAccountNumber?: string;
+  transferDestinationType?: string;
+  paySlipTransportEMail?: boolean;
+  paySlipTransportMitDK?: boolean;
+  paySlipTransportEBoks?: boolean;
+  paySlipTransportSMS?: boolean;
   onboardingState?: string;
 }
 
@@ -180,6 +186,7 @@ export interface ContractInput {
   salaryCycleID: string;
   validFrom: string;
   position?: string;
+  employmentPositionID?: string; // DISCO-08 standard position
   departmentID?: string;
   employmentType?: string;       // Ordinary | Freelance
   workDaysPerWeek?: number;      // builds workCycle (Mon..)
@@ -203,8 +210,15 @@ export interface SalaryEmployeeInput {
   language?: string;        // da | en
   departmentID?: string;
   nationalID?: string;
+  nationalIDType?: string;       // DK CPR | DK CVR | DK Foreign | DK No CPR
   bankRegistrationNumber?: string;
   bankAccountNumber?: string;
+  transferDestinationType?: string; // DK Account | DK NemKonto | Foreign Account | None
+  // How the payslip is delivered (TRIN 2 Kommunikation).
+  paySlipTransportEMail?: boolean;
+  paySlipTransportMitDK?: boolean;
+  paySlipTransportEBoks?: boolean;
+  paySlipTransportSMS?: boolean;
 }
 
 export interface SalaryPayRoll {
@@ -277,6 +291,15 @@ export const salary = {
       onboardingState: "Draft",
       language: input.language || "da",
       affiliationType: input.affiliationType || "Standard",
+      // Sensible Danish defaults so the record isn't missing mandatory choices.
+      nationalIDType: input.nationalIDType || "DK CPR",
+      // "Udenlandsk konto" stays off by default — pay out to a normal DK account.
+      transferDestinationType: input.transferDestinationType || "DK Account",
+      // Payslip delivery defaults (mit.dk + e-mail), matching Salary's onboarding.
+      paySlipTransportMitDK: input.paySlipTransportMitDK ?? true,
+      paySlipTransportEMail: input.paySlipTransportEMail ?? true,
+      paySlipTransportEBoks: input.paySlipTransportEBoks ?? false,
+      paySlipTransportSMS: input.paySlipTransportSMS ?? false,
     });
     return (await send<{ data: SalaryEmployee }>("POST", "/v2/employees", body)).data;
   },
@@ -305,6 +328,11 @@ export const salary = {
     );
     return c.data?.productionUnits ?? [];
   },
+  // DISCO-08 standard occupation codes (Stilling) — not company-scoped.
+  listEmploymentPositions: async (country = "DK") =>
+    get<Page<{ id: string; code?: string; title?: string; group?: string; active?: boolean }>>(
+      "/v2/employmentPositions", { country },
+    ),
 
   /** Next free employee number (Salary requires one on the employment). */
   nextEmployeeNumber: async () => {
@@ -336,6 +364,7 @@ export const salary = {
       timeRegistrationMethodType: "Coarse",
       salaryRegistrationMethodType: "Coarse",
       ...(input.position ? { position: input.position } : {}),
+      ...(input.employmentPositionID ? { employmentPositionID: input.employmentPositionID } : {}),
       ...(input.departmentID ? { departmentID: input.departmentID } : {}),
       ...(input.weeklyHours ? { workCycleHours: [input.weeklyHours] } : {}),
       workCycle: [WEEKDAYS.slice(0, days)],

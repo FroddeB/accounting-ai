@@ -22,6 +22,7 @@ const upload = multer({
 // Whitelist the master-data fields we accept from the client (no salary/remuneration).
 function pickEmployeeInput(body: Record<string, unknown>): SalaryEmployeeInput {
   const s = (v: unknown) => (typeof v === "string" && v.trim() !== "" ? v.trim() : undefined);
+  const b = (v: unknown) => (typeof v === "boolean" ? v : undefined);
   return {
     name: s(body.name),
     email: s(body.email),
@@ -34,9 +35,80 @@ function pickEmployeeInput(body: Record<string, unknown>): SalaryEmployeeInput {
     language: s(body.language),
     departmentID: s(body.departmentID),
     nationalID: s(body.nationalID),
+    nationalIDType: s(body.nationalIDType),
     bankRegistrationNumber: s(body.bankRegistrationNumber),
     bankAccountNumber: s(body.bankAccountNumber),
+    transferDestinationType: s(body.transferDestinationType),
+    paySlipTransportEMail: b(body.paySlipTransportEMail),
+    paySlipTransportMitDK: b(body.paySlipTransportMitDK),
+    paySlipTransportEBoks: b(body.paySlipTransportEBoks),
+    paySlipTransportSMS: b(body.paySlipTransportSMS),
   };
+}
+
+const num = (v: unknown): number | undefined => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
+};
+const str = (v: unknown): string | undefined => (typeof v === "string" && v.trim() !== "" ? v.trim() : undefined);
+
+/**
+ * Create the employment + contract (salary, hours, vacation, lunch, DISCO-08) for an
+ * employee that already exists. Auto-resolves the production unit and monthly cycle when
+ * not given. Used both by the full create and to complete an existing draft.
+ */
+async function setupContract(employeeId: string, c: Record<string, unknown>, actor: string) {
+  const startDate = str(c.startDate)?.slice(0, 10) ?? new Date().toISOString().slice(0, 10);
+  const employeeNumber = await salary.nextEmployeeNumber();
+  const employment = await salary.createEmployment({
+    employeeID: employeeId,
+    employeeNumber,
+    startDate,
+    incomeType: str(c.incomeType) || "DKSalaryIncome",
+  });
+
+  let productionUnitID = str(c.productionUnitID);
+  if (!productionUnitID) {
+    const pus = await salary.listProductionUnits();
+    productionUnitID = pus[0]?.id;
+  }
+  if (!productionUnitID) throw new Error("No production unit (Arbejdssted) is configured in Salary.dk");
+
+  let salaryCycleID = str(c.salaryCycleID);
+  if (!salaryCycleID) {
+    const cycles = (await salary.listSalaryCycles()).data ?? [];
+    salaryCycleID = (cycles.find((x) => x.frequency === "Monthly") ?? cycles[0])?.id;
+  }
+  if (!salaryCycleID) throw new Error("No salary cycle is configured in Salary.dk");
+
+  const salaryTypeID = str(c.salaryTypeID);
+  const monthlySalary = num(c.monthlySalary);
+  const leaveTypeID = str(c.leaveTypeID);
+  const vacationDays = num(c.vacationDays);
+  const lunchAmount = num(c.lunchAmount);
+
+  const contract = await salary.createEmployeeContract({
+    employmentID: employment.id,
+    productionUnitID,
+    salaryCycleID,
+    validFrom: startDate,
+    position: str(c.position),
+    employmentPositionID: str(c.employmentPositionID),
+    departmentID: str(c.departmentID),
+    employmentType: str(c.employmentType) || "Ordinary",
+    weeklyHours: num(c.weeklyHours),
+    workDaysPerWeek: num(c.workDaysPerWeek),
+    salary: salaryTypeID && monthlySalary != null ? [{ salaryTypeID, rate: monthlySalary }] : [],
+    leave: leaveTypeID && vacationDays != null ? [{ typeID: leaveTypeID, days: vacationDays }] : [],
+    benefits: lunchAmount != null ? [{ type: "Lunch", amount: lunchAmount, title: "Frokostordning" }] : [],
+  });
+
+  await recordAudit({
+    actor, toolName: "salary.contract_create",
+    request: { employeeId, contract: c },
+    response: { employmentID: employment.id, contractID: contract.id }, status: "success",
+  });
+  return { employmentID: employment.id, contractID: contract.id };
 }
 
 function handle(res: import("express").Response, err: unknown, what: string): void {
@@ -108,12 +180,13 @@ salaryRouter.post("/employees/parse-contract", upload.single("file"), async (req
 // Company-specific reference data for the contract form (salary types, cycles, etc.).
 salaryRouter.get("/employees/reference", async (_req, res) => {
   try {
-    const [salaryTypes, salaryCycles, leaveTypes, productionUnits, departments] = await Promise.all([
+    const [salaryTypes, salaryCycles, leaveTypes, productionUnits, departments, positions] = await Promise.all([
       salary.listSalaryTypes(),
       salary.listSalaryCycles(),
       salary.listLeaveTypes(),
       salary.listProductionUnits(),
       salary.listDepartments(),
+      salary.listEmploymentPositions("DK"),
     ]);
     res.json({
       salaryTypes: salaryTypes.data ?? [],
@@ -121,6 +194,7 @@ salaryRouter.get("/employees/reference", async (_req, res) => {
       leaveTypes: leaveTypes.data ?? [],
       productionUnits,
       departments: departments.data ?? [],
+      employmentPositions: positions.data ?? [],
     });
   } catch (err) {
     handle(res, err, "reference");
@@ -175,13 +249,11 @@ salaryRouter.post("/employees/full", async (req: AuthedRequest, res) => {
     res.status(400).json({ error: "Name is required" });
     return;
   }
-  const num = (v: unknown): number | undefined => {
-    const n = Number(v);
-    return Number.isFinite(n) ? n : undefined;
-  };
-  const str = (v: unknown): string | undefined => (typeof v === "string" && v.trim() !== "" ? v.trim() : undefined);
-  const monthlySalary = num(c.monthlySalary);
-  const wantsContract = monthlySalary != null || str(c.salaryTypeID) != null || num(c.weeklyHours) != null;
+  // Carry the department + employment type from the master record onto the contract.
+  if (emp.departmentID && !str(c.departmentID)) c.departmentID = emp.departmentID;
+  if (!str(c.employmentType)) c.employmentType = emp.affiliationType === "Freelancer" ? "Freelance" : "Ordinary";
+
+  const wantsContract = num(c.monthlySalary) != null || str(c.salaryTypeID) != null || num(c.weeklyHours) != null;
 
   let employeeId: string | undefined;
   try {
@@ -196,56 +268,8 @@ salaryRouter.post("/employees/full", async (req: AuthedRequest, res) => {
       res.json({ ok: true, employeeId: created.id });
       return;
     }
-
-    const startDate = str(c.startDate)?.slice(0, 10) ?? new Date().toISOString().slice(0, 10);
-    const employeeNumber = await salary.nextEmployeeNumber();
-    const employment = await salary.createEmployment({
-      employeeID: created.id,
-      employeeNumber,
-      startDate,
-      incomeType: str(c.incomeType) || "DKSalaryIncome",
-    });
-
-    let productionUnitID = str(c.productionUnitID);
-    if (!productionUnitID) {
-      const pus = await salary.listProductionUnits();
-      productionUnitID = pus[0]?.id;
-    }
-    if (!productionUnitID) throw new Error("No production unit (Arbejdssted) is configured in Salary.dk");
-
-    let salaryCycleID = str(c.salaryCycleID);
-    if (!salaryCycleID) {
-      const cycles = (await salary.listSalaryCycles()).data ?? [];
-      salaryCycleID = (cycles.find((x) => x.frequency === "Monthly") ?? cycles[0])?.id;
-    }
-    if (!salaryCycleID) throw new Error("No salary cycle is configured in Salary.dk");
-
-    const salaryTypeID = str(c.salaryTypeID);
-    const leaveTypeID = str(c.leaveTypeID);
-    const vacationDays = num(c.vacationDays);
-    const lunchAmount = num(c.lunchAmount);
-
-    const contract = await salary.createEmployeeContract({
-      employmentID: employment.id,
-      productionUnitID,
-      salaryCycleID,
-      validFrom: startDate,
-      position: str(c.position),
-      departmentID: emp.departmentID ?? str(c.departmentID),
-      employmentType: emp.affiliationType === "Freelancer" ? "Freelance" : "Ordinary",
-      weeklyHours: num(c.weeklyHours),
-      workDaysPerWeek: num(c.workDaysPerWeek),
-      salary: salaryTypeID && monthlySalary != null ? [{ salaryTypeID, rate: monthlySalary }] : [],
-      leave: leaveTypeID && vacationDays != null ? [{ typeID: leaveTypeID, days: vacationDays }] : [],
-      benefits: lunchAmount != null ? [{ type: "Lunch", amount: lunchAmount, title: "Frokostordning" }] : [],
-    });
-
-    await recordAudit({
-      actor, toolName: "salary.contract_create",
-      request: { employeeId: created.id, contract: c },
-      response: { employmentID: employment.id, contractID: contract.id }, status: "success",
-    });
-    res.json({ ok: true, employeeId: created.id, employmentID: employment.id, contractID: contract.id });
+    const result = await setupContract(created.id, c, actor);
+    res.json({ ok: true, employeeId: created.id, ...result });
   } catch (err) {
     await recordAudit({
       actor, toolName: "salary.employee_full_create",
@@ -263,6 +287,24 @@ salaryRouter.post("/employees/full", async (req: AuthedRequest, res) => {
     } else {
       handle(res, err, "employee-full-create");
     }
+  }
+});
+
+// Complete an existing (draft) employee: create the employment + contract via the API.
+salaryRouter.post("/employees/:id/contract", async (req: AuthedRequest, res) => {
+  const actor = req.user!.email;
+  const id = String(req.params.id);
+  const c = (req.body?.contract ?? req.body ?? {}) as Record<string, unknown>;
+  try {
+    const result = await setupContract(id, c, actor);
+    res.json({ ok: true, employeeId: id, ...result });
+  } catch (err) {
+    await recordAudit({
+      actor, toolName: "salary.contract_create",
+      request: { employeeId: id, contract: c },
+      response: { error: err instanceof SalaryApiError ? err.body : String(err) }, status: "error",
+    });
+    handle(res, err, "setup-contract");
   }
 });
 

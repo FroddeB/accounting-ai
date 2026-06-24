@@ -148,8 +148,17 @@ export const salary = {
   listEmployees: async (limit = 200, offset = 0) =>
     get<Page<SalaryEmployee>>("/v2/employees", { companyID: await companyId(), limit, offset, includeRemuneration: "true" }),
 
-  listPayrolls: async (limit = 50, offset = 0) =>
-    get<Page<SalaryPayRoll>>("/v2/payRolls", { companyID: await companyId(), limit, offset }),
+  // /v2/payRolls requires a from/to window; default to last year → end of next year.
+  listPayrolls: async (opts: { from?: string; to?: string; limit?: number; offset?: number } = {}) => {
+    const y = new Date().getUTCFullYear();
+    return get<Page<SalaryPayRoll>>("/v2/payRolls", {
+      companyID: await companyId(),
+      from: opts.from ?? `${y - 1}-01-01`,
+      to: opts.to ?? `${y + 1}-12-31`,
+      limit: opts.limit ?? 50,
+      offset: opts.offset ?? 0,
+    });
+  },
 
   getPayroll: (id: string) => get<SalaryPayRoll>(`/v2/payRolls/${encodeURIComponent(id)}`),
 

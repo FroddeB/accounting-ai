@@ -76,26 +76,7 @@ async function setupContract(employeeId: string, c: Record<string, unknown>, act
     employmentID = employment.id;
   }
 
-  // Request the tax card (skattekort) from SKAT if none exists and none has been requested.
-  // SKAT responds asynchronously, so the card won't appear immediately — but without this
-  // request the employee can never become payroll-ready. Non-fatal: log and continue.
-  try {
-    const [cards, requests] = await Promise.all([
-      salary.listTaxCards(employeeId),
-      salary.listTaxCardRequests(employeeId),
-    ]);
-    const hasCard = (cards.data ?? []).length > 0;
-    const hasRequest = (requests.data ?? []).length > 0;
-    if (!hasCard && !hasRequest) {
-      await salary.createTaxCardRequest(employeeId, "NewEmployee");
-      await recordAudit({
-        actor, toolName: "salary.taxcard_request",
-        request: { employeeId, requestType: "NewEmployee" }, response: { ok: true }, status: "success",
-      });
-    }
-  } catch (e) {
-    console.error("[salary] tax card request failed for", employeeId, ":", e instanceof SalaryApiError ? JSON.stringify(e.body) : e);
-  }
+  await ensureTaxCardRequested(employeeId, actor);
 
   let productionUnitID = str(c.productionUnitID);
   if (!productionUnitID) {
@@ -247,6 +228,38 @@ function markReadyErrorMessage(e: unknown): string {
     return "Salary.dk asked for a 2FA code during login, so the app can't finalize automatically. Disable MFA for the service login, or finalize in the Salary.dk UI.";
   }
   return raw;
+}
+
+/**
+ * Make sure a tax card (skattekort) has been requested from SKAT for this employee.
+ * An employee can't reach Final without one, and SKAT responds asynchronously, so we
+ * request as early as possible. Returns whether a card already exists. Non-fatal: a
+ * failure here is logged and surfaced but doesn't abort the surrounding operation.
+ */
+async function ensureTaxCardRequested(employeeId: string, actor: string): Promise<{ hasCard: boolean; requested: boolean; error?: string }> {
+  try {
+    const [cards, requests] = await Promise.all([
+      salary.listTaxCards(employeeId),
+      salary.listTaxCardRequests(employeeId),
+    ]);
+    const hasCard = (cards.data ?? []).length > 0;
+    const hasRequest = (requests.data ?? []).length > 0;
+    if (hasCard || hasRequest) return { hasCard, requested: false };
+    await salary.createTaxCardRequest(employeeId, "NewEmployee");
+    await recordAudit({
+      actor, toolName: "salary.taxcard_request",
+      request: { employeeId, requestType: "NewEmployee" }, response: { ok: true }, status: "success",
+    });
+    return { hasCard: false, requested: true };
+  } catch (e) {
+    const error = e instanceof SalaryApiError ? fmtSalaryError(e.body) : (e instanceof Error ? e.message : String(e));
+    console.error("[salary] tax card request failed for", employeeId, ":", error);
+    await recordAudit({
+      actor, toolName: "salary.taxcard_request",
+      request: { employeeId, requestType: "NewEmployee" }, response: { error }, status: "error",
+    });
+    return { hasCard: false, requested: false, error };
+  }
 }
 
 function handle(res: import("express").Response, err: unknown, what: string): void {
@@ -481,17 +494,29 @@ salaryRouter.post("/employees/:id/contract", async (req: AuthedRequest, res) => 
 // Mark an existing employee ready for payroll (take them out of kladde).
 salaryRouter.post("/employees/:id/ready", async (req: AuthedRequest, res) => {
   const id = String(req.params.id);
+  // The employee can't reach Final without a tax card from SKAT — make sure it's requested.
+  const tax = await ensureTaxCardRequested(id, req.user!.email);
   try {
     await salary.markReady(id);
     await recordAudit({
       actor: req.user!.email, toolName: "salary.employee_ready",
-      request: { id }, response: { ready: true }, status: "success",
+      request: { id }, response: { ready: true, tax }, status: "success",
     });
-    res.json({ ok: true, ready: true });
+    // markReady can succeed yet the employee stays Draft until SKAT returns the tax card.
+    if (!tax.hasCard) {
+      res.json({
+        ok: true, ready: true, pendingTaxCard: true,
+        note: tax.requested
+          ? "Marked ready and requested the tax card from SKAT. The employee stays a draft until SKAT returns the card (usually shortly) — then it finalizes automatically."
+          : "Marked ready, but Salary is still waiting on the tax card from SKAT before it can finalize.",
+      });
+    } else {
+      res.json({ ok: true, ready: true });
+    }
   } catch (err) {
     await recordAudit({
       actor: req.user!.email, toolName: "salary.employee_ready",
-      request: { id }, response: { error: err instanceof SalaryApiError ? err.body : String(err) }, status: "error",
+      request: { id }, response: { error: err instanceof SalaryApiError ? err.body : String(err), tax }, status: "error",
     });
     if (err instanceof SalaryApiError) {
       res.json({ ok: false, ready: false, readyError: markReadyErrorMessage(err) });

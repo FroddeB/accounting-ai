@@ -232,33 +232,32 @@ function markReadyErrorMessage(e: unknown): string {
 
 /**
  * Make sure a tax card (skattekort) has been requested from SKAT for this employee.
- * An employee can't reach Final without one, and SKAT responds asynchronously, so we
- * request as early as possible. Returns whether a card already exists. Non-fatal: a
- * failure here is logged and surfaced but doesn't abort the surrounding operation.
+ * The Salary web UI auto-creates a NewEmployee tax-card request on hire, but the API
+ * does NOT — so an API-created employee never gets a card (and can't reach Final) unless
+ * we request it. SKAT responds asynchronously, so the card arrives later. Must use the
+ * user-session token (sendAsUser) — the API client can't touch tax cards. Non-fatal.
  */
-async function ensureTaxCardRequested(employeeId: string, actor: string): Promise<{ hasCard: boolean; requested: boolean; error?: string }> {
+async function ensureTaxCardRequested(employeeId: string, actor: string): Promise<{ requested: boolean; alreadyRequested: boolean; error?: string }> {
   try {
-    const [cards, requests] = await Promise.all([
-      salary.listTaxCards(employeeId),
-      salary.listTaxCardRequests(employeeId),
-    ]);
-    const hasCard = (cards.data ?? []).length > 0;
-    const hasRequest = (requests.data ?? []).length > 0;
-    if (hasCard || hasRequest) return { hasCard, requested: false };
     await salary.createTaxCardRequest(employeeId, "NewEmployee");
     await recordAudit({
       actor, toolName: "salary.taxcard_request",
       request: { employeeId, requestType: "NewEmployee" }, response: { ok: true }, status: "success",
     });
-    return { hasCard: false, requested: true };
+    return { requested: true, alreadyRequested: false };
   } catch (e) {
     const error = e instanceof SalaryApiError ? fmtSalaryError(e.body) : (e instanceof Error ? e.message : String(e));
+    // 422 "requestType should be one of [ReRequest, Unsubscribe]" means a request/SKAT
+    // subscription already exists for this CPR — that's fine, nothing more to do.
+    if (/ReRequest|Unsubscribe|already/i.test(error)) {
+      return { requested: false, alreadyRequested: true };
+    }
     console.error("[salary] tax card request failed for", employeeId, ":", error);
     await recordAudit({
       actor, toolName: "salary.taxcard_request",
       request: { employeeId, requestType: "NewEmployee" }, response: { error }, status: "error",
     });
-    return { hasCard: false, requested: false, error };
+    return { requested: false, alreadyRequested: false, error };
   }
 }
 
@@ -502,19 +501,13 @@ salaryRouter.post("/employees/:id/ready", async (req: AuthedRequest, res) => {
       actor: req.user!.email, toolName: "salary.employee_ready",
       request: { id }, response: { ready: true, tax }, status: "success",
     });
-    // markReady can succeed yet the employee stays Draft until SKAT returns the tax card.
-    if (!tax.hasCard) {
-      res.json({
-        ok: true, ready: true, pendingTaxCard: true, taxError: tax.error,
-        note: tax.requested
-          ? "Marked ready and requested the tax card from SKAT. The employee stays a draft until SKAT returns the card (usually shortly) — then it finalizes automatically."
-          : tax.error
-            ? `Marked ready, but requesting the tax card from SKAT failed: ${tax.error}`
-            : "Marked ready, but Salary is still waiting on the tax card from SKAT before it can finalize.",
-      });
-    } else {
-      res.json({ ok: true, ready: true });
-    }
+    // markReady succeeds, but the employee stays Draft until SKAT returns the tax card.
+    res.json({
+      ok: true, ready: true, pendingTaxCard: true, taxError: tax.error,
+      note: tax.error
+        ? `Marked ready, but requesting the tax card from SKAT failed: ${tax.error}`
+        : "Marked ready and requested the tax card from SKAT. The employee stays a draft until SKAT returns the card (usually within minutes during business hours) — then it finalizes automatically.",
+    });
   } catch (err) {
     await recordAudit({
       actor: req.user!.email, toolName: "salary.employee_ready",

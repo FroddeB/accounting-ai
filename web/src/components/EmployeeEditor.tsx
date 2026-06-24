@@ -226,7 +226,8 @@ export function EmployeeEditor({
       } else if (res.ok) {
         toast.warning(`Created, but still a draft — Salary needs: ${fmtReady(res.readyError)}`, { duration: 12000 });
       } else {
-        toast.error(`Employee created, but salary wasn't set: ${res.error}`);
+        const detail = res.detail ? ` — Salary says: ${fmtReady(res.detail)}` : "";
+        toast.error(`Employee created, but salary wasn't set: ${res.error}${detail}`, { duration: 12000 });
       }
       onSaved();
     } catch (e) {
@@ -258,7 +259,11 @@ export function EmployeeEditor({
     try {
       const res = await api.post(`/api/salary/employees/${employeeId}/contract`, { contract: contractPayload() });
       if (res.ready) toast.success("Salary & contract saved — employee is ready for payroll ✓");
-      else toast.warning(`Contract saved, but still a draft — Salary needs: ${fmtReady(res.readyError)}`, { duration: 12000 });
+      else if (res.ok) toast.warning(`Contract saved, but still a draft — Salary needs: ${fmtReady(res.readyError)}`, { duration: 12000 });
+      else {
+        const detail = res.detail ? ` — Salary says: ${fmtReady(res.detail)}` : "";
+        toast.error(`Contract rejected: ${res.error}${detail}`, { duration: 12000 });
+      }
       onSaved();
     } catch (e) {
       toast.error((e as ApiError).message);

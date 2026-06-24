@@ -214,6 +214,8 @@ export interface ContractInput {
   leave?: { typeID: string; days: number }[];
   /** Personalegoder, e.g. { type: "Lunch", amount: 20, title: "Frokostordning" }. */
   benefits?: { type: string; amount?: number; title?: string }[];
+  /** Supplements, e.g. { typeID: "...", compensationRate: 0.01 } for vacation allowance. */
+  supplements?: { typeID: string; compensationRate: number }[];
   // Vacation scheme configuration
   vacationDays?: number;         // Total vacation days per year (e.g. 25)
   ferieType?: string;            // "Ferie med løn" | "Ferie uden løn" | "Direktørløn"
@@ -368,6 +370,11 @@ export const salary = {
       "/v2/employmentPositions", { country },
     ),
 
+  listSupplementTypes: async () =>
+    get<Page<{ id: string; name?: string; compensationType?: string; minCompensationRate?: number; maxCompensationRate?: number }>>(
+      "/v2/supplementTypes", { companyID: await companyId(), limit: 100 },
+    ),
+
   listEmployments: async (employeeID: string) =>
     get<Page<{ id: string }>>("/v2/employments", { employeeID, companyID: await companyId(), limit: 50 }),
 
@@ -419,7 +426,7 @@ export const salary = {
         salary: input.salary ?? [],
         leave: input.leave ?? [],
         benefits: input.benefits ?? [],
-        supplements: [],
+        supplements: input.supplements ?? [],
         pension: [],
       },
     };

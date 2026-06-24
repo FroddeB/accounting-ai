@@ -102,6 +102,24 @@ async function setupContract(employeeId: string, c: Record<string, unknown>, act
   const ferietillæg = num(c.ferietillæg) ?? 1; // Default to 1%
   const storeBededagstillæg = c.storeBededagstillæg !== false; // Default to true (enabled)
 
+  // Build supplements array: vacation allowance + optional great prayer day
+  const supplements: { typeID: string; compensationRate: number }[] = [];
+  if (ferieType === "Ferie med løn" && ferietillæg > 0) {
+    // Find DenmarkVacationSupplement (name contains "VacationSupplement" or "Vacation")
+    const suppTypes = (await salary.listSupplementTypes()).data ?? [];
+    const vacationSupplement = suppTypes.find((s) => (s.name ?? "").includes("VacationSupplement") || (s.name ?? "").includes("Vacation"));
+    if (vacationSupplement) {
+      supplements.push({ typeID: vacationSupplement.id, compensationRate: ferietillæg / 100 });
+    }
+    // Add Great Prayer Day supplement if enabled
+    if (storeBededagstillæg) {
+      const prayerSupplement = suppTypes.find((s) => (s.name ?? "").includes("GreatPrayerDay") || (s.name ?? "").includes("Prayer"));
+      if (prayerSupplement) {
+        supplements.push({ typeID: prayerSupplement.id, compensationRate: 0.0045 }); // Default rate
+      }
+    }
+  }
+
   try {
     var contract = await salary.createEmployeeContract({
       employmentID,
@@ -117,6 +135,7 @@ async function setupContract(employeeId: string, c: Record<string, unknown>, act
       salary: salaryTypeID && monthlySalary != null ? [{ salaryTypeID, rate: monthlySalary }] : [],
       leave: leaveTypeID && vacationDays != null ? [{ typeID: leaveTypeID, days: vacationDays }] : [],
       benefits: lunchAmount != null ? [{ type: lunchType, amount: lunchAmount, title: "Frokostordning" }] : [],
+      supplements,
       vacationDays,
       ferieType,
       ferietillæg,

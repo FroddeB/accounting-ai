@@ -88,7 +88,9 @@ export function EmployeeEditor({
       setRef(r);
       const cycle = r.salaryCycles.find((c) => c.frequency === "Monthly") ?? r.salaryCycles[0];
       const fixed = r.salaryTypes.find((s) => s.active && s.class === "Fixed") ?? r.salaryTypes.find((s) => s.class === "Fixed");
-      const ferie = r.leaveTypes.find((l) => /ferie|vacation/i.test(l.name ?? "")) ?? r.leaveTypes[0];
+      // Prefer "DenmarkVacationAccrual" (paid vacation with accrual) over other types
+      const ferie = r.leaveTypes.find((l) => (l.name ?? "").includes("Accrual")) ??
+        r.leaveTypes.find((l) => /ferie|vacation/i.test(l.name ?? "")) ?? r.leaveTypes[0];
       const pu = r.productionUnits[0];
       setForm((f) => ({
         ...f,

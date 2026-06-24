@@ -161,6 +161,7 @@ async function setupContract(employeeId: string, c: Record<string, unknown>, act
     await salary.markReady(employeeId);
     ready = true;
   } catch (e) {
+    console.error("[salary] markReady failed for", employeeId, ":", JSON.stringify(e instanceof SalaryApiError ? e.body : e, null, 2));
     readyError = e instanceof SalaryApiError ? fmtSalaryError(e.body) : (e instanceof Error ? e.message : String(e));
   }
   await recordAudit({

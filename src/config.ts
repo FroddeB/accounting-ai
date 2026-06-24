@@ -40,10 +40,13 @@ export const config = {
 
   salary: {
     // API-client credentials (register via dev@salary.dk) — required for /v2/auth.
-    apiClientId: process.env.SALARY_API_CLIENT_ID ?? "",
-    apiClientSecret: process.env.SALARY_API_CLIENT_SECRET ?? "",
-    // Company API key (Salary → Settings → Company) — scopes the access token to a company.
+    // Accept both SALARY_API_CLIENT_* and the shorter SALARY_CLIENT_* names.
+    apiClientId: process.env.SALARY_API_CLIENT_ID ?? process.env.SALARY_CLIENT_ID ?? "",
+    apiClientSecret: process.env.SALARY_API_CLIENT_SECRET ?? process.env.SALARY_CLIENT_SECRET ?? "",
+    // Company API key (Salary → Settings → Company).
     apiKey: process.env.SALARY_API_KEY ?? "",
+    // Optional — pin the companyID; otherwise auto-resolved from /v2/companies.
+    companyId: process.env.SALARY_COMPANY_ID ?? "",
     base: optional("SALARY_API_BASE", "https://api.salary.dk"),
   },
 

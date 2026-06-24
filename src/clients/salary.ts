@@ -125,16 +125,34 @@ export interface SalaryPayRoll {
   salaryCycle?: { name?: string };
 }
 
+export interface SalaryCompany { id: string; name?: string; city?: string; address?: string; }
+
+// The API-client token isn't bound to a user, so list endpoints need an explicit
+// companyID. Pin it via SALARY_COMPANY_ID, else auto-resolve the first accessible company.
+let cachedCompanyId: string | null = null;
+async function companyId(): Promise<string> {
+  if (config.salary.companyId) return config.salary.companyId;
+  if (cachedCompanyId) return cachedCompanyId;
+  const r = await get<Page<SalaryCompany>>("/v2/companies");
+  const id = r.data?.[0]?.id;
+  if (!id) throw new SalaryApiError("No company is accessible for this Salary API key", 404, r);
+  cachedCompanyId = id;
+  return id;
+}
+
 export const salary = {
   isConfigured,
 
-  listEmployees: (limit = 200, offset = 0) =>
-    get<Page<SalaryEmployee>>("/v2/employees", { limit, offset, includeRemuneration: "true" }),
+  listCompanies: () => get<Page<SalaryCompany>>("/v2/companies"),
 
-  listPayrolls: (limit = 50, offset = 0) =>
-    get<Page<SalaryPayRoll>>("/v2/payRolls", { limit, offset }),
+  listEmployees: async (limit = 200, offset = 0) =>
+    get<Page<SalaryEmployee>>("/v2/employees", { companyID: await companyId(), limit, offset, includeRemuneration: "true" }),
+
+  listPayrolls: async (limit = 50, offset = 0) =>
+    get<Page<SalaryPayRoll>>("/v2/payRolls", { companyID: await companyId(), limit, offset }),
 
   getPayroll: (id: string) => get<SalaryPayRoll>(`/v2/payRolls/${encodeURIComponent(id)}`),
 
-  listDepartments: () => get<Page<{ id: string; name?: string }>>("/v2/departments"),
+  listDepartments: async () =>
+    get<Page<{ id: string; name?: string }>>("/v2/departments", { companyID: await companyId() }),
 };

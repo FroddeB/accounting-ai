@@ -90,14 +90,23 @@ async function setupContract(employeeId: string, c: Record<string, unknown>, act
   }
   if (!salaryCycleID) throw new Error("No salary cycle is configured in Salary.dk");
 
-  let leaveTypeID = str(c.leaveTypeID);
   const vacationDays = num(c.vacationDays) ?? 25; // Default to 25 days per year
-  if (!leaveTypeID) {
-    // Auto-resolve to "DenmarkVacationAccrual" (paid vacation with accrual)
-    const leaves = (await salary.listLeaveTypes()).data ?? [];
-    const accrual = leaves.find((l) => (l.name ?? "").includes("Accrual"));
-    leaveTypeID = accrual?.id ?? leaves[0]?.id;
-  }
+  // Vacation scheme: "Ferie med løn" (paid) with 1% allowance + Great Prayer Day supplement.
+  const ferieType = str(c.ferieType) || "Ferie med løn";
+  const ferietillæg = num(c.ferietillæg) ?? 1; // Default to 1%
+  const storeBededagstillæg = c.storeBededagstillæg !== false; // Default to true (enabled)
+  const isPaidVacation = ferieType === "Ferie med løn";
+
+  // Resolve the vacation leave type by name. Paid vacation MUST use DenmarkVacationAccrual
+  // (payoutType DenmarkVacationBasis) so the vacation supplement has a basis to accrue on;
+  // unpaid uses DenmarkVacationFund. Match by exact name, not the form's leaveTypeID, so the
+  // leave type and the supplements always agree (mismatch → Salary "vacation is required").
+  const leaves = (await salary.listLeaveTypes()).data ?? [];
+  const leaveByName = (n: string) => leaves.find((l) => l.name === n)?.id;
+  let leaveTypeID = isPaidVacation
+    ? (leaveByName("DenmarkVacationAccrual") ?? str(c.leaveTypeID))
+    : (leaveByName("DenmarkVacationFund") ?? str(c.leaveTypeID));
+  if (!leaveTypeID) leaveTypeID = str(c.leaveTypeID) || leaves[0]?.id;
   if (!leaveTypeID) throw new Error("No vacation leave type is configured in Salary.dk");
 
   const salaryTypeID = str(c.salaryTypeID);
@@ -105,25 +114,23 @@ async function setupContract(employeeId: string, c: Record<string, unknown>, act
   const lunchAmount = num(c.lunchAmount);
   // "Lunch" = per period, "Lunch Daily" = per day.
   const lunchType = str(c.lunchType) === "Lunch Daily" ? "Lunch Daily" : "Lunch";
-  // Vacation scheme defaults: "Ferie med løn" (paid) with 1% allowance and Great Prayer Day supplement.
-  const ferieType = str(c.ferieType) || "Ferie med løn";
-  const ferietillæg = num(c.ferietillæg) ?? 1; // Default to 1%
-  const storeBededagstillæg = c.storeBededagstillæg !== false; // Default to true (enabled)
 
-  // Build supplements array: vacation allowance + optional great prayer day
+  // Build supplements array: vacation allowance + optional Great Prayer Day. Match the
+  // EXACT supplement-type names the Salary UI uses — a "Special"/"Fritvalg" variant has no
+  // paid-vacation basis and triggers a "vacation is required" rejection.
   const supplements: { typeID: string; compensationRate: number }[] = [];
-  if (ferieType === "Ferie med løn" && ferietillæg > 0) {
-    // Find DenmarkVacationSupplement (name contains "VacationSupplement" or "Vacation")
+  if (isPaidVacation) {
     const suppTypes = (await salary.listSupplementTypes()).data ?? [];
-    const vacationSupplement = suppTypes.find((s) => (s.name ?? "").includes("VacationSupplement") || (s.name ?? "").includes("Vacation"));
-    if (vacationSupplement) {
-      supplements.push({ typeID: vacationSupplement.id, compensationRate: ferietillæg / 100 });
+    const clamp = (s: { minCompensationRate?: number; maxCompensationRate?: number }, rate: number) =>
+      Math.min(s.maxCompensationRate ?? rate, Math.max(s.minCompensationRate ?? rate, rate));
+    const vacationSupp = suppTypes.find((s) => s.name === "DenmarkVacationSupplement");
+    if (vacationSupp && ferietillæg > 0) {
+      supplements.push({ typeID: vacationSupp.id, compensationRate: clamp(vacationSupp, ferietillæg / 100) });
     }
-    // Add Great Prayer Day supplement if enabled
     if (storeBededagstillæg) {
-      const prayerSupplement = suppTypes.find((s) => (s.name ?? "").includes("GreatPrayerDay") || (s.name ?? "").includes("Prayer"));
-      if (prayerSupplement) {
-        supplements.push({ typeID: prayerSupplement.id, compensationRate: 0.0045 }); // Default rate
+      const prayerSupp = suppTypes.find((s) => s.name === "DenmarkGreatPrayerDaySupplement");
+      if (prayerSupp) {
+        supplements.push({ typeID: prayerSupp.id, compensationRate: clamp(prayerSupp, 0.0045) });
       }
     }
   }

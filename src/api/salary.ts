@@ -505,10 +505,12 @@ salaryRouter.post("/employees/:id/ready", async (req: AuthedRequest, res) => {
     // markReady can succeed yet the employee stays Draft until SKAT returns the tax card.
     if (!tax.hasCard) {
       res.json({
-        ok: true, ready: true, pendingTaxCard: true,
+        ok: true, ready: true, pendingTaxCard: true, taxError: tax.error,
         note: tax.requested
           ? "Marked ready and requested the tax card from SKAT. The employee stays a draft until SKAT returns the card (usually shortly) — then it finalizes automatically."
-          : "Marked ready, but Salary is still waiting on the tax card from SKAT before it can finalize.",
+          : tax.error
+            ? `Marked ready, but requesting the tax card from SKAT failed: ${tax.error}`
+            : "Marked ready, but Salary is still waiting on the tax card from SKAT before it can finalize.",
       });
     } else {
       res.json({ ok: true, ready: true });

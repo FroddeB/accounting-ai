@@ -451,7 +451,9 @@ export const salary = {
 
   /** Request a tax card (skattekort) from SKAT. Needs a user session, like mark-ready. */
   createTaxCardRequest: async (employeeID: string, requestType = "NewEmployee") =>
-    (await sendAsUser<{ data: { id: string } }>("POST", "/v2/taxCardRequests", { employeeID, requestType })).data,
+    (await sendAsUser<{ data: { id: string } }>("POST", "/v2/taxCardRequests", {
+      employeeID, requestType, companyID: await companyId(),
+    })).data,
 
   /** Next free employee number (Salary requires one on the employment). */
   nextEmployeeNumber: async () => {

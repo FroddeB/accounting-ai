@@ -292,7 +292,8 @@ export function EmployeeEditor({
     setReadying(true);
     try {
       const res = await api.post(`/api/salary/employees/${employeeId}/ready`);
-      if (res.ready && res.pendingTaxCard) { toast.info(res.note ?? "Marked ready — waiting on the tax card from SKAT.", { duration: 12000 }); onSaved(); }
+      if (res.ready && res.taxError) { toast.warning(`Marked ready, but tax card request failed: ${res.taxError}`, { duration: 15000 }); onSaved(); }
+      else if (res.ready && res.pendingTaxCard) { toast.info(res.note ?? "Marked ready — waiting on the tax card from SKAT.", { duration: 12000 }); onSaved(); }
       else if (res.ready) { toast.success("Employee marked ready for payroll ✓"); onSaved(); }
       else toast.warning(`Still a draft — ${fmtReady(res.readyError)}`, { duration: 12000 });
     } catch (e) {

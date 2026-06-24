@@ -132,7 +132,7 @@ async function setupContract(employeeId: string, c: Record<string, unknown>, act
     await salary.markReady(employeeId);
     ready = true;
   } catch (e) {
-    readyError = e instanceof SalaryApiError ? e.body : (e instanceof Error ? e.message : String(e));
+    readyError = e instanceof SalaryApiError ? fmtSalaryError(e.body) : (e instanceof Error ? e.message : String(e));
   }
   await recordAudit({
     actor, toolName: "salary.employee_ready",
@@ -140,6 +140,23 @@ async function setupContract(employeeId: string, c: Record<string, unknown>, act
   });
 
   return { employmentID, contractID: contract.id, ready, readyError };
+}
+
+// Format Salary.dk error objects into human-readable messages.
+function fmtSalaryError(e: unknown): string {
+  if (typeof e === "string") return e;
+  const o = e as any;
+  if (o.message && typeof o.message === "string") return o.message;
+  if (o.error && typeof o.error === "string") return o.error;
+  if (o.errors) {
+    const msgs: string[] = [];
+    for (const [k, v] of Object.entries(o.errors as any)) {
+      if (typeof v === "string") msgs.push(`${k}: ${v}`);
+      else if (Array.isArray(v) && v.length > 0 && typeof v[0] === "string") msgs.push(`${k}: ${v[0]}`);
+    }
+    if (msgs.length > 0) return msgs.join("; ");
+  }
+  return "missing required fields";
 }
 
 function handle(res: import("express").Response, err: unknown, what: string): void {
@@ -387,24 +404,7 @@ salaryRouter.post("/employees/:id/ready", async (req: AuthedRequest, res) => {
       request: { id }, response: { error: err instanceof SalaryApiError ? err.body : String(err) }, status: "error",
     });
     if (err instanceof SalaryApiError) {
-      // Surface Salary's reason (which fields are still missing) to the UI.
-      // Try to extract a human-readable error message from Salary's nested error structure.
-      const fmtErr = (body: unknown): string => {
-        if (typeof body === "string") return body;
-        const o = body as any;
-        if (o.message && typeof o.message === "string") return o.message;
-        if (o.error && typeof o.error === "string") return o.error;
-        if (o.errors) {
-          const msgs = [];
-          for (const [k, v] of Object.entries(o.errors as any)) {
-            if (typeof v === "string") msgs.push(`${k}: ${v}`);
-            else if (Array.isArray(v) && v.length > 0) msgs.push(`${k}: ${v[0]}`);
-          }
-          if (msgs.length > 0) return msgs.join("; ");
-        }
-        return "missing required fields";
-      };
-      res.json({ ok: false, ready: false, readyError: fmtErr(err.body) });
+      res.json({ ok: false, ready: false, readyError: fmtSalaryError(err.body) });
     } else {
       handle(res, err, "mark-ready");
     }

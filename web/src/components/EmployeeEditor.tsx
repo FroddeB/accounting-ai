@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { FileUp, Loader2, Save, Sparkles, Wallet, X } from "lucide-react";
+import { FileUp, Loader2, Save, Sparkles, Trash2, Wallet, X } from "lucide-react";
 
 export interface Department { id: string; name?: string }
 interface Ref { id: string; name?: string; title?: string; class?: string; active?: boolean; frequency?: string; code?: string }
@@ -63,6 +63,7 @@ export function EmployeeEditor({
   const [parsing, setParsing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [settingUp, setSettingUp] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [ref, setRef] = useState<Reference | null>(null);
   const [lunchOn, setLunchOn] = useState(false);
 
@@ -88,20 +89,40 @@ export function EmployeeEditor({
 
   useEffect(() => {
     if (!isEdit) { setLoading(false); return; }
-    api.get(`/api/salary/employees/${employeeId}`)
-      .then((e) => setForm((f) => ({
-        ...f,
-        name: e.name ?? "", email: e.email ?? "", phoneNumber: e.phoneNumber ?? "",
-        address: e.address ?? "", postalCode: e.postalCode ?? "", city: e.city ?? "",
-        nationalID: e.nationalID ?? "", bankRegistrationNumber: e.bankRegistrationNumber ?? "",
-        bankAccountNumber: e.bankAccountNumber ?? "",
-        affiliationType: e.affiliationType || "Standard", language: e.language || "da",
-        departmentID: e.departmentID ?? "",
-        paySlipMitDK: e.paySlipTransportMitDK ?? f.paySlipMitDK,
-        paySlipEMail: e.paySlipTransportEMail ?? f.paySlipEMail,
-        paySlipEBoks: e.paySlipTransportEBoks ?? f.paySlipEBoks,
-        paySlipSMS: e.paySlipTransportSMS ?? f.paySlipSMS,
-      })))
+    // Load master record + current contract together so every field prefills.
+    Promise.all([
+      api.get(`/api/salary/employees/${employeeId}`),
+      api.get(`/api/salary/employees/${employeeId}/contract`).catch(() => ({ hasContract: false })),
+    ])
+      .then(([e, k]) => {
+        if (k.lunchAmount != null) setLunchOn(true);
+        setForm((f) => ({
+          ...f,
+          name: e.name ?? "", email: e.email ?? "", phoneNumber: e.phoneNumber ?? "",
+          address: e.address ?? "", postalCode: e.postalCode ?? "", city: e.city ?? "",
+          nationalID: e.nationalID ?? "", bankRegistrationNumber: e.bankRegistrationNumber ?? "",
+          bankAccountNumber: e.bankAccountNumber ?? "",
+          affiliationType: e.affiliationType || "Standard", language: e.language || "da",
+          departmentID: e.departmentID ?? "",
+          paySlipMitDK: e.paySlipTransportMitDK ?? f.paySlipMitDK,
+          paySlipEMail: e.paySlipTransportEMail ?? f.paySlipEMail,
+          paySlipEBoks: e.paySlipTransportEBoks ?? f.paySlipEBoks,
+          paySlipSMS: e.paySlipTransportSMS ?? f.paySlipSMS,
+          // contract (if the employee already has one)
+          position: k.position ?? f.position,
+          employmentPositionID: k.employmentPositionID ?? f.employmentPositionID,
+          startDate: (k.validFrom ?? f.startDate)?.slice(0, 10) ?? "",
+          productionUnitID: k.productionUnitID ?? f.productionUnitID,
+          salaryCycleID: k.salaryCycleID ?? f.salaryCycleID,
+          salaryTypeID: k.salaryTypeID ?? f.salaryTypeID,
+          monthlySalary: k.monthlySalary != null ? String(k.monthlySalary) : f.monthlySalary,
+          weeklyHours: k.weeklyHours != null ? String(k.weeklyHours) : f.weeklyHours,
+          workDaysPerWeek: k.workDaysPerWeek != null ? String(k.workDaysPerWeek) : f.workDaysPerWeek,
+          leaveTypeID: k.leaveTypeID ?? f.leaveTypeID,
+          vacationDays: k.vacationDays != null ? String(k.vacationDays) : f.vacationDays,
+          lunchAmount: k.lunchAmount != null ? String(k.lunchAmount) : f.lunchAmount,
+        }));
+      })
       .catch((err) => toast.error((err as ApiError).message))
       .finally(() => setLoading(false));
   }, [employeeId, isEdit]);
@@ -203,6 +224,21 @@ export function EmployeeEditor({
       toast.error((e as ApiError).message);
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function remove() {
+    if (!employeeId) return;
+    if (!window.confirm(`Delete ${form.name || "this employee"} from Salary.dk? This can't be undone.`)) return;
+    setDeleting(true);
+    try {
+      await api.del(`/api/salary/employees/${employeeId}`);
+      toast.success("Employee deleted ✓");
+      onSaved();
+    } catch (e) {
+      toast.error((e as ApiError).message);
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -329,8 +365,8 @@ export function EmployeeEditor({
 
             {isEdit ? (
               <div className="rounded-md border bg-muted/40 p-3 text-xs text-muted-foreground">
-                Use <b>Save details</b> for personal/payslip fields. Use <b>Create employment &amp; contract</b> only
-                if this employee has no salary/contract set up yet (it adds employment → contract via the API).
+                <b>Save details</b> updates personal/payslip fields. <b>Save salary &amp; contract</b> writes a new
+                contract version (salary, hours, vacation, lunch) on the existing employment.
               </div>
             ) : (
               <p className="text-xs text-muted-foreground">
@@ -347,10 +383,17 @@ export function EmployeeEditor({
               {isEdit && (
                 <Button variant="secondary" onClick={setupPayroll} disabled={saving || settingUp}>
                   {settingUp ? <Loader2 className="size-4 animate-spin" /> : <Wallet className="size-4" />}
-                  Create employment &amp; contract
+                  Save salary &amp; contract
                 </Button>
               )}
               <Button variant="ghost" onClick={onClose}>Cancel</Button>
+              {isEdit && (
+                <Button variant="ghost" className="ml-auto text-destructive hover:text-destructive"
+                  onClick={remove} disabled={deleting || saving || settingUp}>
+                  {deleting ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+                  Delete
+                </Button>
+              )}
             </div>
           </>
         )}

@@ -59,13 +59,21 @@ const str = (v: unknown): string | undefined => (typeof v === "string" && v.trim
  */
 async function setupContract(employeeId: string, c: Record<string, unknown>, actor: string) {
   const startDate = str(c.startDate)?.slice(0, 10) ?? new Date().toISOString().slice(0, 10);
-  const employeeNumber = await salary.nextEmployeeNumber();
-  const employment = await salary.createEmployment({
-    employeeID: employeeId,
-    employeeNumber,
-    startDate,
-    incomeType: str(c.incomeType) || "DKSalaryIncome",
-  });
+
+  // Reuse the existing employment if there is one (contracts are versioned, not updated;
+  // a new contract is posted against the same employment). Only create one if none exists.
+  const employments = (await salary.listEmployments(employeeId)).data ?? [];
+  let employmentID = employments[0]?.id;
+  if (!employmentID) {
+    const employeeNumber = await salary.nextEmployeeNumber();
+    const employment = await salary.createEmployment({
+      employeeID: employeeId,
+      employeeNumber,
+      startDate,
+      incomeType: str(c.incomeType) || "DKSalaryIncome",
+    });
+    employmentID = employment.id;
+  }
 
   let productionUnitID = str(c.productionUnitID);
   if (!productionUnitID) {
@@ -88,7 +96,7 @@ async function setupContract(employeeId: string, c: Record<string, unknown>, act
   const lunchAmount = num(c.lunchAmount);
 
   const contract = await salary.createEmployeeContract({
-    employmentID: employment.id,
+    employmentID,
     productionUnitID,
     salaryCycleID,
     validFrom: startDate,
@@ -106,9 +114,9 @@ async function setupContract(employeeId: string, c: Record<string, unknown>, act
   await recordAudit({
     actor, toolName: "salary.contract_create",
     request: { employeeId, contract: c },
-    response: { employmentID: employment.id, contractID: contract.id }, status: "success",
+    response: { employmentID, contractID: contract.id }, status: "success",
   });
-  return { employmentID: employment.id, contractID: contract.id };
+  return { employmentID, contractID: contract.id };
 }
 
 function handle(res: import("express").Response, err: unknown, what: string): void {
@@ -209,6 +217,37 @@ salaryRouter.get("/employees/:id", async (req, res) => {
   }
 });
 
+// The employee's current contract, flattened for the edit form.
+salaryRouter.get("/employees/:id/contract", async (req, res) => {
+  try {
+    const c = await salary.getEmployeeContract(String(req.params.id));
+    if (!c) {
+      res.json({ hasContract: false });
+      return;
+    }
+    const sal = c.remuneration?.salary?.[0];
+    const lv = c.remuneration?.leave?.[0];
+    const lunch = c.remuneration?.benefits?.find((b) => b.type === "Lunch");
+    res.json({
+      hasContract: true,
+      position: c.position ?? null,
+      employmentPositionID: c.employmentPositionID ?? null,
+      salaryCycleID: c.salaryCycleID ?? null,
+      productionUnitID: c.productionUnitID ?? null,
+      weeklyHours: c.workCycleHours?.[0] ?? null,
+      workDaysPerWeek: c.weeklyWorkDays ?? null,
+      salaryTypeID: sal?.salaryTypeID ?? null,
+      monthlySalary: sal?.rate ?? null,
+      leaveTypeID: lv?.typeID ?? null,
+      vacationDays: lv?.days ?? null,
+      lunchAmount: lunch?.amount ?? null,
+      validFrom: c.validFrom ?? null,
+    });
+  } catch (err) {
+    handle(res, err, "get-contract");
+  }
+});
+
 // Create a new employee as an onboarding draft in Salary.dk.
 salaryRouter.post("/employees", async (req: AuthedRequest, res) => {
   const input = pickEmployeeInput(req.body ?? {});
@@ -305,6 +344,25 @@ salaryRouter.post("/employees/:id/contract", async (req: AuthedRequest, res) => 
       response: { error: err instanceof SalaryApiError ? err.body : String(err) }, status: "error",
     });
     handle(res, err, "setup-contract");
+  }
+});
+
+// Delete an employee (and orphaned salary parts). Useful for clearing bad drafts.
+salaryRouter.delete("/employees/:id", async (req: AuthedRequest, res) => {
+  const id = String(req.params.id);
+  try {
+    await salary.deleteEmployee(id);
+    await recordAudit({
+      actor: req.user!.email, toolName: "salary.employee_delete",
+      request: { id }, response: { ok: true }, status: "success",
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    await recordAudit({
+      actor: req.user!.email, toolName: "salary.employee_delete",
+      request: { id }, response: { error: err instanceof SalaryApiError ? err.body : String(err) }, status: "error",
+    });
+    handle(res, err, "delete-employee");
   }
 });
 

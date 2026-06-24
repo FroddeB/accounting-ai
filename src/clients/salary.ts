@@ -179,6 +179,25 @@ export interface EmploymentInput {
   incomeType?: string;           // DKSalaryIncome, ...
 }
 
+/** The current contract, read back to prefill the edit form. */
+export interface EmployeeContract {
+  id: string;
+  employmentID?: string;
+  position?: string;
+  employmentPositionID?: string;
+  salaryCycleID?: string;
+  productionUnitID?: string;
+  workCycleHours?: number[];
+  weeklyWorkDays?: number;
+  validFrom?: string;
+  validTo?: string;
+  remuneration?: {
+    salary?: { salaryTypeID: string; rate: number }[];
+    leave?: { typeID: string; days: number }[];
+    benefits?: { type: string; amount?: number; title?: string }[];
+  };
+}
+
 /** The remuneration + contract terms for a new employee (salary, hours, vacation, lunch). */
 export interface ContractInput {
   employmentID: string;
@@ -315,6 +334,10 @@ export const salary = {
     )).data;
   },
 
+  /** Delete an employee; removeOrphans clears any orphaned salary parts (employment/contract). */
+  deleteEmployee: (id: string) =>
+    send<unknown>("DELETE", `/v2/employees/${encodeURIComponent(id)}?removeOrphans=true`),
+
   // ── Reference lists (for mapping a contract's terms to company-specific IDs) ──
   listSalaryTypes: async () =>
     get<Page<SalaryType>>("/v2/salaryTypes", { companyID: await companyId(), limit: 200 }),
@@ -333,6 +356,18 @@ export const salary = {
     get<Page<{ id: string; code?: string; title?: string; group?: string; active?: boolean }>>(
       "/v2/employmentPositions", { country },
     ),
+
+  listEmployments: async (employeeID: string) =>
+    get<Page<{ id: string }>>("/v2/employments", { employeeID, companyID: await companyId(), limit: 50 }),
+
+  /** The employee's current contract (no validTo, else latest), or null if none. */
+  getEmployeeContract: async (employeeID: string) => {
+    const r = await get<Page<EmployeeContract>>("/v2/employeeContracts", { employeeID, limit: 50 });
+    const list = r.data ?? [];
+    if (!list.length) return null;
+    return list.find((c) => !c.validTo)
+      ?? [...list].sort((a, b) => String(b.validFrom ?? "").localeCompare(String(a.validFrom ?? "")))[0];
+  },
 
   /** Next free employee number (Salary requires one on the employment). */
   nextEmployeeNumber: async () => {

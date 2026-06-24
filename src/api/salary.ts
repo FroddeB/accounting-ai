@@ -154,6 +154,7 @@ async function setupContract(employeeId: string, c: Record<string, unknown>, act
 
 // Format Salary.dk error objects into human-readable messages.
 function fmtSalaryError(e: unknown): string {
+  console.log("[salary] fmtSalaryError input:", JSON.stringify(e, null, 2));
   if (typeof e === "string") return e;
   const o = e as any;
   if (o.message && typeof o.message === "string") return o.message;
@@ -166,7 +167,7 @@ function fmtSalaryError(e: unknown): string {
     }
     if (msgs.length > 0) return msgs.join("; ");
   }
-  return "missing required fields";
+  return JSON.stringify(e);
 }
 
 function handle(res: import("express").Response, err: unknown, what: string): void {

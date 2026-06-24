@@ -121,6 +121,7 @@ async function setupContract(employeeId: string, c: Record<string, unknown>, act
       ferieType,
       ferietillæg,
       storeBededagstillæg,
+      hasATP: c.hasATP !== false, // Default to true if not explicitly set to false
     });
   } catch (e) {
     console.error("[salary] contract creation 400 detail:", JSON.stringify(e instanceof SalaryApiError ? e.body : e, null, 2));

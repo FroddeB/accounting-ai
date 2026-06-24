@@ -35,7 +35,7 @@ interface Form {
   // vacation scheme
   ferieType: string; ferietillæg: string; storeBededagstillæg: boolean;
   // employment settings
-  preferredTaxCardType: string;
+  preferredTaxCardType: string; hasATP: boolean;
 }
 
 const EMPTY: Form = {
@@ -47,7 +47,7 @@ const EMPTY: Form = {
   salaryTypeID: "", monthlySalary: "", weeklyHours: "", workDaysPerWeek: "",
   leaveTypeID: "", vacationDays: "25", lunchAmount: "", lunchType: "Lunch",
   ferieType: "Ferie med løn", ferietillæg: "1", storeBededagstillæg: true,
-  preferredTaxCardType: "Primary",
+  preferredTaxCardType: "Primary", hasATP: true,
 };
 
 const AFFILIATIONS = ["Standard", "Director", "MajorityShareholder", "Freelancer"];
@@ -138,6 +138,7 @@ export function EmployeeEditor({
           ferieType: k.ferieType ?? f.ferieType,
           ferietillæg: k.ferietillæg != null ? String(k.ferietillæg) : f.ferietillæg,
           storeBededagstillæg: k.storeBededagstillæg != null ? k.storeBededagstillæg : f.storeBededagstillæg,
+          hasATP: k.hasATP != null ? k.hasATP : f.hasATP,
         }));
       })
       .catch((err) => toast.error((err as ApiError).message))
@@ -216,7 +217,7 @@ export function EmployeeEditor({
       leaveTypeID: form.leaveTypeID, vacationDays: form.vacationDays,
       lunchAmount: lunchOn ? form.lunchAmount : "", lunchType: form.lunchType,
       ferieType: form.ferieType, ferietillæg: form.ferietillæg, storeBededagstillæg: form.storeBededagstillæg,
-      preferredTaxCardType: form.preferredTaxCardType,
+      preferredTaxCardType: form.preferredTaxCardType, hasATP: form.hasATP,
     };
   }
 
@@ -403,6 +404,12 @@ export function EmployeeEditor({
                 <label className="flex items-center gap-2 text-sm font-medium">
                   <input type="checkbox" checked={form.storeBededagstillæg} onChange={(e) => set("storeBededagstillæg")(e.target.checked)} />
                   Store Bededagstillæg (Great Prayer Day supplement)
+                </label>
+              </div>
+              <div className="grid gap-1.5">
+                <label className="flex items-center gap-2 text-sm font-medium">
+                  <input type="checkbox" checked={form.hasATP} onChange={(e) => set("hasATP")(e.target.checked)} />
+                  ATP (Occupational pension)
                 </label>
               </div>
               <div className="grid gap-1.5">

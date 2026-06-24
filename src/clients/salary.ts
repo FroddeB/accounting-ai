@@ -219,6 +219,8 @@ export interface ContractInput {
   ferieType?: string;            // "Ferie med løn" | "Ferie uden løn" | "Direktørløn"
   ferietillæg?: number;          // Vacation allowance percentage (e.g. 1 for 1%)
   storeBededagstillæg?: boolean; // Great Prayer Day supplement enabled
+  // Pension / benefits
+  hasATP?: boolean;              // ATP (Arbejdsmarkedets Tillægspension) occupational pension
 }
 
 /** Editable master-data fields we accept from the UI (no salary/remuneration). */
@@ -426,6 +428,10 @@ export const salary = {
     if (input.ferietillæg != null) body.ferietillæg = input.ferietillæg;
     if (input.storeBededagstillæg != null) body.storeBededagstillæg = input.storeBededagstillæg;
     if (input.vacationDays != null) body.vacationDays = input.vacationDays;
+    // ATP pension: if enabled, add to the pension array.
+    if (input.hasATP) {
+      body.remuneration.pension = [{ type: "ATP" }];
+    }
     return (await send<{ data: { id: string } }>("POST", "/v2/employeeContracts", body)).data;
   },
 };

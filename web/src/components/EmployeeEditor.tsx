@@ -34,6 +34,8 @@ interface Form {
   lunchAmount: string; lunchType: string; // "Lunch" (per period) | "Lunch Daily" (per day)
   // vacation scheme
   ferieType: string; ferietillæg: string; storeBededagstillæg: boolean;
+  // employment settings
+  preferredTaxCardType: string;
 }
 
 const EMPTY: Form = {
@@ -45,6 +47,7 @@ const EMPTY: Form = {
   salaryTypeID: "", monthlySalary: "", weeklyHours: "", workDaysPerWeek: "",
   leaveTypeID: "", vacationDays: "25", lunchAmount: "", lunchType: "Lunch",
   ferieType: "Ferie med løn", ferietillæg: "1", storeBededagstillæg: true,
+  preferredTaxCardType: "Primary",
 };
 
 const AFFILIATIONS = ["Standard", "Director", "MajorityShareholder", "Freelancer"];
@@ -213,6 +216,7 @@ export function EmployeeEditor({
       leaveTypeID: form.leaveTypeID, vacationDays: form.vacationDays,
       lunchAmount: lunchOn ? form.lunchAmount : "", lunchType: form.lunchType,
       ferieType: form.ferieType, ferietillæg: form.ferietillæg, storeBededagstillæg: form.storeBededagstillæg,
+      preferredTaxCardType: form.preferredTaxCardType,
     };
   }
 

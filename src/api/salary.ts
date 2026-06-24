@@ -70,6 +70,7 @@ async function setupContract(employeeId: string, c: Record<string, unknown>, act
       employeeID: employeeId,
       employeeNumber,
       startDate,
+      preferredTaxCardType: str(c.preferredTaxCardType) || "Primary",
       incomeType: str(c.incomeType) || "DKSalaryIncome",
     });
     employmentID = employment.id;

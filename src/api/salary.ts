@@ -90,10 +90,18 @@ async function setupContract(employeeId: string, c: Record<string, unknown>, act
   }
   if (!salaryCycleID) throw new Error("No salary cycle is configured in Salary.dk");
 
+  let leaveTypeID = str(c.leaveTypeID);
+  const vacationDays = num(c.vacationDays) ?? 25; // Default to 25 days per year
+  if (!leaveTypeID) {
+    // Auto-resolve to "DenmarkVacationAccrual" (paid vacation with accrual)
+    const leaves = (await salary.listLeaveTypes()).data ?? [];
+    const accrual = leaves.find((l) => (l.name ?? "").includes("Accrual"));
+    leaveTypeID = accrual?.id ?? leaves[0]?.id;
+  }
+  if (!leaveTypeID) throw new Error("No vacation leave type is configured in Salary.dk");
+
   const salaryTypeID = str(c.salaryTypeID);
   const monthlySalary = num(c.monthlySalary);
-  const leaveTypeID = str(c.leaveTypeID);
-  const vacationDays = num(c.vacationDays) ?? 25; // Default to 25 days per year
   const lunchAmount = num(c.lunchAmount);
   // "Lunch" = per period, "Lunch Daily" = per day.
   const lunchType = str(c.lunchType) === "Lunch Daily" ? "Lunch Daily" : "Lunch";

@@ -428,9 +428,9 @@ export const salary = {
     if (input.ferietillæg != null) body.ferietillæg = input.ferietillæg;
     if (input.storeBededagstillæg != null) body.storeBededagstillæg = input.storeBededagstillæg;
     if (input.vacationDays != null) body.vacationDays = input.vacationDays;
-    // ATP pension: if enabled, add to the pension array.
+    // ATP pension: if enabled, add to the pension array with required scheme.
     if (input.hasATP) {
-      body.remuneration.pension = [{ type: "ATP" }];
+      body.remuneration.pension = [{ type: "ATP", scheme: "ATP" }];
     }
     return (await send<{ data: { id: string } }>("POST", "/v2/employeeContracts", body)).data;
   },

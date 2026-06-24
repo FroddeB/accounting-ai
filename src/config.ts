@@ -48,6 +48,10 @@ export const config = {
     // Optional — pin the companyID; otherwise auto-resolved from /v2/companies.
     companyId: process.env.SALARY_COMPANY_ID ?? "",
     base: optional("SALARY_API_BASE", "https://api.salary.dk"),
+    // Optional user login (email+password) — needed only for actions that require a
+    // logged-in user session (e.g. mark-ready), which the API client token can't do.
+    userEmail: process.env.SALARY_USER_EMAIL ?? "",
+    userPassword: process.env.SALARY_USER_PASSWORD ?? "",
   },
 
   /** When true, write tools simulate and record a dry_run audit entry instead of mutating. */

@@ -2,7 +2,7 @@ import { Router } from "express";
 import multer from "multer";
 import { requireAuth, type AuthedRequest } from "../auth/middleware.js";
 import {
-  salary, isConfigured, SalaryNotConfiguredError, SalaryApiError,
+  salary, isConfigured, hasUserLogin, SalaryNotConfiguredError, SalaryApiError,
   type SalaryEmployeeInput,
 } from "../clients/salary.js";
 import { extractEmployeeFromContract } from "../ai/contracts.js";
@@ -198,9 +198,7 @@ async function setupContract(employeeId: string, c: Record<string, unknown>, act
     ready = true;
   } catch (e) {
     console.error("[salary] markReady failed for", employeeId, ":", JSON.stringify(e instanceof SalaryApiError ? e.body : e, null, 2));
-    readyError = isUserSessionRequired(e)
-      ? "Everything is set — just open the employee in Salary.dk and click \"Klar til løn\" to finalize. (Salary requires a logged-in user for this final step; the API client can't do it.)"
-      : (e instanceof SalaryApiError ? fmtSalaryError(e.body) : (e instanceof Error ? e.message : String(e)));
+    readyError = markReadyErrorMessage(e);
   }
   await recordAudit({
     actor, toolName: "salary.employee_ready",
@@ -235,12 +233,20 @@ function fmtSalaryError(e: unknown): string {
   return JSON.stringify(e);
 }
 
-// Salary's mark-ready requires a logged-in *user* session; our API-client token has none,
-// so it 404s with "User Not Found". Detect that and explain the manual step.
-function isUserSessionRequired(e: unknown): boolean {
-  const body = e instanceof SalaryApiError ? e.body : e;
-  const msg = fmtSalaryError(body);
-  return /user not found/i.test(msg);
+// Mark-ready requires a logged-in user session (SALARY_USER_EMAIL/PASSWORD). Produce a
+// message that tells the user exactly what to do depending on why it failed.
+function markReadyErrorMessage(e: unknown): string {
+  const raw = e instanceof SalaryApiError ? fmtSalaryError(e.body) : (e instanceof Error ? e.message : String(e));
+  if (!hasUserLogin()) {
+    return "Add SALARY_USER_EMAIL + SALARY_USER_PASSWORD on the server so the app can log in as a user — Salary requires a logged-in user to finalize an employee (the API client can't).";
+  }
+  if (/user not found/i.test(raw)) {
+    return "Salary still won't finalize this employee. The user login may lack permission, or Salary needs the tax card from SKAT to arrive first — try again shortly.";
+  }
+  if (/mfa|recoveryCode|mfaChallenge/i.test(raw)) {
+    return "Salary.dk asked for a 2FA code during login, so the app can't finalize automatically. Disable MFA for the service login, or finalize in the Salary.dk UI.";
+  }
+  return raw;
 }
 
 function handle(res: import("express").Response, err: unknown, what: string): void {
@@ -488,10 +494,7 @@ salaryRouter.post("/employees/:id/ready", async (req: AuthedRequest, res) => {
       request: { id }, response: { error: err instanceof SalaryApiError ? err.body : String(err) }, status: "error",
     });
     if (err instanceof SalaryApiError) {
-      const readyError = isUserSessionRequired(err)
-        ? "Everything is set — just open the employee in Salary.dk and click \"Klar til løn\" to finalize. (Salary requires a logged-in user for this final step; the API client can't do it.)"
-        : fmtSalaryError(err.body);
-      res.json({ ok: false, ready: false, readyError });
+      res.json({ ok: false, ready: false, readyError: markReadyErrorMessage(err) });
     } else {
       handle(res, err, "mark-ready");
     }

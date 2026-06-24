@@ -72,6 +72,54 @@ async function token(force = false): Promise<string> {
   return authenticate();
 }
 
+// Separate user-session token (email+password login). Required for actions that need a
+// logged-in user — notably mark-ready — which the API-client token can't perform.
+let cachedUserToken: string | null = null;
+let cachedUserAt = 0;
+
+export function hasUserLogin(): boolean {
+  return Boolean(config.salary.userEmail && config.salary.userPassword);
+}
+
+async function authenticateUser(): Promise<string> {
+  if (!hasUserLogin()) {
+    throw new SalaryApiError("No Salary.dk user login configured (set SALARY_USER_EMAIL + SALARY_USER_PASSWORD)", 401, null);
+  }
+  const res = await fetch(`${config.salary.base}/v2/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: config.salary.userEmail, password: config.salary.userPassword }),
+  });
+  const text = await res.text();
+  if (!res.ok) {
+    let body: unknown = text;
+    try { body = JSON.parse(text); } catch { /* keep text */ }
+    throw new SalaryApiError(`Salary.dk user login → ${res.status}`, res.status, body);
+  }
+  const data = JSON.parse(text) as { data?: { accessToken?: string } };
+  const tok = data.data?.accessToken;
+  if (!tok) throw new SalaryApiError("Salary.dk user login returned no accessToken (MFA required?)", 500, data);
+  cachedUserToken = tok;
+  cachedUserAt = Date.now();
+  return tok;
+}
+
+async function userToken(force = false): Promise<string> {
+  if (!force && cachedUserToken && Date.now() - cachedUserAt < TOKEN_TTL_MS) return cachedUserToken;
+  return authenticateUser();
+}
+
+/** Like send(), but authenticated as the logged-in user (for mark-ready etc.). */
+async function sendAsUser<T>(method: string, path: string, body?: unknown): Promise<T> {
+  assertConfigured();
+  let res = await rawSend<T>(method, path, body, await userToken());
+  if (!res.ok && res.status === 401) {
+    res = await rawSend<T>(method, path, body, await userToken(true));
+  }
+  if (!res.ok) throw new SalaryApiError(`Salary.dk ${method} ${path} → ${res.status}`, res.status, res.body);
+  return res.data;
+}
+
 async function rawGet<T>(path: string, qs: string, accessToken: string): Promise<{ ok: true; data: T } | { ok: false; status: number; body: unknown }> {
   const res = await fetch(`${config.salary.base}${path}${qs ? `?${qs}` : ""}`, {
     headers: { Authorization: accessToken, "Content-Type": "application/json" },
@@ -348,8 +396,10 @@ export const salary = {
     send<unknown>("DELETE", `/v2/employees/${encodeURIComponent(id)}?removeOrphans=true`),
 
   /** Mark an employee ready for payroll (out of kladde). Throws 400 listing missing fields. */
+  // Mark-ready requires a logged-in user session, so authenticate as the user (email+password)
+  // rather than the API client. Falls back with a clear error if no user login is configured.
   markReady: (id: string) =>
-    send<{ data: SalaryEmployee }>("POST", `/v2/employees/${encodeURIComponent(id)}/ready`),
+    sendAsUser<{ data: SalaryEmployee }>("POST", `/v2/employees/${encodeURIComponent(id)}/ready`),
 
   // ── Reference lists (for mapping a contract's terms to company-specific IDs) ──
   listSalaryTypes: async () =>

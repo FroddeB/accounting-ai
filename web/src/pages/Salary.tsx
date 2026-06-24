@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import { api, ApiError } from "../api";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
-import { Banknote, Loader2, Users } from "lucide-react";
+import { Banknote, Loader2, Plus, Users } from "lucide-react";
+import { EmployeeEditor, type Department } from "../components/EmployeeEditor";
 
 interface Employee {
   id: string; name?: string; email?: string;
@@ -33,20 +35,30 @@ export function Salary() {
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [payrolls, setPayrolls] = useState<PayRoll[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(true);
+  // null = editor closed; { id: null } = create; { id: "…" } = edit that employee.
+  const [editing, setEditing] = useState<{ id: string | null } | null>(null);
+
+  async function loadEmployees() {
+    const emp = await api.get("/api/salary/employees");
+    setEmployees(emp.data ?? []);
+  }
 
   useEffect(() => {
     api.get("/api/salary/status").then(async (s) => {
       setConfigured(s.configured);
       if (!s.configured) { setLoading(false); return; }
       try {
-        const [emp, pr] = await Promise.all([
+        const [emp, pr, dep] = await Promise.all([
           api.get("/api/salary/employees"),
           api.get("/api/salary/payrolls"),
+          api.get("/api/salary/departments").catch(() => ({ data: [] })),
         ]);
         setEmployees(emp.data ?? []);
         setPayrolls(pr.data ?? []);
+        setDepartments(dep.data ?? []);
       } catch (e) {
         setErr((e as ApiError).message);
       } finally {
@@ -61,7 +73,7 @@ export function Salary() {
     <div className="grid gap-6">
       <div>
         <h1 className="flex items-center gap-2 text-lg font-semibold"><Banknote className="size-5" /> Salary</h1>
-        <p className="text-sm text-muted-foreground">Employees and payroll runs from Salary.dk (read-only).</p>
+        <p className="text-sm text-muted-foreground">Employees and payroll runs from Salary.dk. Upload a contract to draft a new employee with AI.</p>
       </div>
 
       {configured === false ? (
@@ -79,6 +91,16 @@ export function Salary() {
       ) : (
         <>
           {err && <p className="text-sm text-destructive">{err}</p>}
+
+          {editing && (
+            <EmployeeEditor
+              employeeId={editing.id}
+              departments={departments}
+              aiEnabled
+              onClose={() => setEditing(null)}
+              onSaved={() => { setEditing(null); loadEmployees().catch(() => {}); }}
+            />
+          )}
 
           <div className="grid gap-4 sm:grid-cols-3">
             <Kpi label="Employees" value={employees.length.toString()} sub={`${activeCount} active`} />
@@ -117,7 +139,10 @@ export function Salary() {
           </Card>
 
           <Card>
-            <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Users className="size-4" /> Employees</CardTitle></CardHeader>
+            <CardHeader className="flex-row items-center justify-between gap-2 space-y-0">
+              <CardTitle className="flex items-center gap-2 text-base"><Users className="size-4" /> Employees</CardTitle>
+              <Button size="sm" onClick={() => setEditing({ id: null })}><Plus className="size-4" /> Add employee</Button>
+            </CardHeader>
             <CardContent>
               <Table>
                 <TableHeader>
@@ -129,7 +154,7 @@ export function Salary() {
                 </TableHeader>
                 <TableBody>
                   {employees.map((e) => (
-                    <TableRow key={e.id}>
+                    <TableRow key={e.id} className="cursor-pointer" onClick={() => setEditing({ id: e.id })}>
                       <TableCell className="font-medium">{e.name ?? "—"}</TableCell>
                       <TableCell className="text-muted-foreground">{e.email ?? "—"}</TableCell>
                       <TableCell><Badge variant="secondary">{e.employmentStatus ?? e.affiliationType ?? "—"}</Badge></TableCell>

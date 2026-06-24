@@ -22,6 +22,13 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
     }).then(parse),
+  patch: (path: string, body?: unknown) =>
+    fetch(path, {
+      method: "PATCH",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    }).then(parse),
   del: (path: string) => fetch(path, { method: "DELETE", credentials: "include" }).then(parse),
   upload: (path: string, file: File) => {
     const fd = new FormData();

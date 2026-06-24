@@ -12,7 +12,7 @@ import { config } from "../config.js";
  */
 
 let client: Anthropic | null = null;
-function getClient(): Anthropic {
+export function getClient(): Anthropic {
   if (!config.anthropic.apiKey) {
     throw new Error("ANTHROPIC_API_KEY is not set — AI invoice matching is unavailable.");
   }
@@ -109,7 +109,7 @@ that are missing their supporting document (bilag). Your job:
    set voucherId null and confidence "none". Never guess a voucher whose amount is clearly different.
 Danish number format uses '.' for thousands and ',' for decimals.`;
 
-function mediaBlock(bytes: Buffer, mimetype: string): Anthropic.ContentBlockParam {
+export function mediaBlock(bytes: Buffer, mimetype: string): Anthropic.ContentBlockParam {
   const data = bytes.toString("base64");
   if (mimetype === "application/pdf") {
     return { type: "document", source: { type: "base64", media_type: "application/pdf", data } };

@@ -10,8 +10,10 @@ import { config } from "../config.js";
  * (register via dev@salary.dk); apiKey (Settings → Company) scopes it to a company.
  * Access tokens are short-lived — we cache one and re-authenticate on 401.
  *
- * READ-ONLY for now. Payroll/employee writes (which move money) are not exposed
- * until built behind an explicit approval flow.
+ * Reads are unrestricted. Employee writes (create/update of the master record) are
+ * exposed but always go through a human review step in the UI before they're called,
+ * and new employees are created as onboarding DRAFTS so nothing enters a payroll run
+ * by accident. Payroll/remuneration writes (which move money) remain unexposed.
  */
 
 export class SalaryNotConfiguredError extends Error {
@@ -81,6 +83,43 @@ async function rawGet<T>(path: string, qs: string, accessToken: string): Promise
   return { ok: false, status: res.status, body };
 }
 
+async function rawSend<T>(
+  method: string,
+  path: string,
+  body: unknown,
+  accessToken: string,
+): Promise<{ ok: true; data: T } | { ok: false; status: number; body: unknown }> {
+  const res = await fetch(`${config.salary.base}${path}`, {
+    method,
+    headers: { Authorization: accessToken, "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (res.ok) {
+    const t = await res.text();
+    return { ok: true, data: (t ? JSON.parse(t) : {}) as T };
+  }
+  const t = await res.text();
+  let b: unknown = t;
+  try { b = JSON.parse(t); } catch { /* keep text */ }
+  return { ok: false, status: res.status, body: b };
+}
+
+/** POST/PATCH/PUT with the same auth + single 401-retry behaviour as get(). */
+async function send<T>(method: string, path: string, body?: unknown): Promise<T> {
+  assertConfigured();
+  let res = await rawSend<T>(method, path, body, await token());
+  if (!res.ok && res.status === 401) {
+    res = await rawSend<T>(method, path, body, await token(true));
+  }
+  if (!res.ok) throw new SalaryApiError(`Salary.dk ${method} ${path} → ${res.status}`, res.status, res.body);
+  return res.data;
+}
+
+/** Drop undefined / empty-string fields so we never overwrite with blanks. */
+function clean(o: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined && v !== ""));
+}
+
 async function get<T>(path: string, params: Record<string, string | number | undefined> = {}): Promise<T> {
   assertConfigured();
   const qs = Object.entries(params)
@@ -108,6 +147,33 @@ export interface SalaryEmployee {
   departmentID?: string;
   city?: string;
   paidOutThisYear?: number;
+  // Returned by GET /v2/employees/{id}; used to prefill the edit form.
+  address?: string;
+  postalCode?: string;
+  phoneNumber?: string;
+  phoneNumberCountryCode?: string;
+  language?: string;
+  nationalID?: string;
+  bankRegistrationNumber?: string;
+  bankAccountNumber?: string;
+  onboardingState?: string;
+}
+
+/** Editable master-data fields we accept from the UI (no salary/remuneration). */
+export interface SalaryEmployeeInput {
+  name?: string;
+  email?: string;
+  phoneNumber?: string;
+  phoneNumberCountryCode?: string;
+  address?: string;
+  postalCode?: string;
+  city?: string;
+  affiliationType?: string; // Standard | Director | MajorityShareholder | Freelancer
+  language?: string;        // da | en
+  departmentID?: string;
+  nationalID?: string;
+  bankRegistrationNumber?: string;
+  bankAccountNumber?: string;
 }
 
 export interface SalaryPayRoll {
@@ -164,4 +230,34 @@ export const salary = {
 
   listDepartments: async () =>
     get<Page<{ id: string; name?: string }>>("/v2/departments", { companyID: await companyId() }),
+
+  getEmployee: async (id: string) =>
+    (await get<{ data: SalaryEmployee }>(`/v2/employees/${encodeURIComponent(id)}`)).data,
+
+  /**
+   * Create an employee as an onboarding DRAFT — it shows up in Salary.dk but isn't
+   * finalised, so it can't enter a payroll run until someone completes onboarding there.
+   * language + affiliationType are required by the API; companyID is injected.
+   */
+  createEmployee: async (input: SalaryEmployeeInput) => {
+    const body = clean({
+      ...input,
+      companyID: await companyId(),
+      onboardingState: "Draft",
+      language: input.language || "da",
+      affiliationType: input.affiliationType || "Standard",
+    });
+    return (await send<{ data: SalaryEmployee }>("POST", "/v2/employees", body)).data;
+  },
+
+  // PATCH uses the lowercase `nationalId` (create uses `nationalID`); map it across.
+  updateEmployee: async (id: string, input: SalaryEmployeeInput) => {
+    const { nationalID, ...rest } = input;
+    const patch = clean({ ...rest, nationalId: nationalID });
+    return (await send<{ data: SalaryEmployee }>(
+      "PATCH",
+      `/v2/employees/${encodeURIComponent(id)}`,
+      patch,
+    )).data;
+  },
 };

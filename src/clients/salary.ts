@@ -385,7 +385,7 @@ export const salary = {
   createEmployment: async (input: EmploymentInput) =>
     (await send<{ data: { id: string } }>("POST", "/v2/employments", clean({
       employeeID: input.employeeID,
-      employeeNumber: input.employeeNumber,
+      employeeNumber: String(input.employeeNumber),
       startDate: input.startDate,
       preferredTaxCardType: input.preferredTaxCardType || "Primary",
       incomeType: input.incomeType || "DKSalaryIncome",

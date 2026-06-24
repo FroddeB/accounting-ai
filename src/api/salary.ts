@@ -76,6 +76,27 @@ async function setupContract(employeeId: string, c: Record<string, unknown>, act
     employmentID = employment.id;
   }
 
+  // Request the tax card (skattekort) from SKAT if none exists and none has been requested.
+  // SKAT responds asynchronously, so the card won't appear immediately — but without this
+  // request the employee can never become payroll-ready. Non-fatal: log and continue.
+  try {
+    const [cards, requests] = await Promise.all([
+      salary.listTaxCards(employeeId),
+      salary.listTaxCardRequests(employeeId),
+    ]);
+    const hasCard = (cards.data ?? []).length > 0;
+    const hasRequest = (requests.data ?? []).length > 0;
+    if (!hasCard && !hasRequest) {
+      await salary.createTaxCardRequest(employeeId, "NewEmployee");
+      await recordAudit({
+        actor, toolName: "salary.taxcard_request",
+        request: { employeeId, requestType: "NewEmployee" }, response: { ok: true }, status: "success",
+      });
+    }
+  } catch (e) {
+    console.error("[salary] tax card request failed for", employeeId, ":", e instanceof SalaryApiError ? JSON.stringify(e.body) : e);
+  }
+
   let productionUnitID = str(c.productionUnitID);
   if (!productionUnitID) {
     const pus = await salary.listProductionUnits();

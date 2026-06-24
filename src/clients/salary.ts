@@ -387,6 +387,22 @@ export const salary = {
       ?? [...list].sort((a, b) => String(b.validFrom ?? "").localeCompare(String(a.validFrom ?? "")))[0];
   },
 
+  /** Existing tax cards for an employee (empty until SKAT responds to a request). */
+  listTaxCards: async (employeeID: string) =>
+    get<Page<{ id: string; taxCardType?: string; taxPercentage?: number }>>(
+      "/v2/taxCards", { employeeID, companyID: await companyId() },
+    ),
+
+  /** Pending/sent tax-card requests for an employee. */
+  listTaxCardRequests: async (employeeID: string) =>
+    get<Page<{ id: string; requestType?: string; status?: string }>>(
+      "/v2/taxCardRequests", { employeeID, companyID: await companyId() },
+    ),
+
+  /** Request a tax card (skattekort) from SKAT for an employee. */
+  createTaxCardRequest: async (employeeID: string, requestType = "NewEmployee") =>
+    (await send<{ data: { id: string } }>("POST", "/v2/taxCardRequests", { employeeID, requestType })).data,
+
   /** Next free employee number (Salary requires one on the employment). */
   nextEmployeeNumber: async () => {
     const r = await get<Page<{ employeeNumber?: string | number }>>(

@@ -67,7 +67,12 @@ export function Salary() {
       {configured === false ? (
         <Card><CardContent className="pt-6 text-sm">
           <p className="font-medium">Salary.dk isn't connected yet.</p>
-          <p className="mt-1 text-muted-foreground">Generate an API key in Salary → Settings → Company, then set <code>SALARY_API_KEY</code> on the server.</p>
+          <p className="mt-1 text-muted-foreground">
+            Salary uses an API-client login. Register a client via <b>dev@salary.dk</b> to get an
+            <code> apiClientID</code> + <code>apiClientSecret</code>, take your company key from Salary →
+            Settings → Company, then set <code>SALARY_API_CLIENT_ID</code>, <code>SALARY_API_CLIENT_SECRET</code>
+            and <code>SALARY_API_KEY</code> on the server.
+          </p>
         </CardContent></Card>
       ) : loading ? (
         <div className="grid place-items-center py-16 text-muted-foreground"><Loader2 className="size-5 animate-spin" /></div>

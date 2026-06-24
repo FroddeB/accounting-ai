@@ -39,10 +39,12 @@ export const config = {
   },
 
   salary: {
+    // API-client credentials (register via dev@salary.dk) — required for /v2/auth.
+    apiClientId: process.env.SALARY_API_CLIENT_ID ?? "",
+    apiClientSecret: process.env.SALARY_API_CLIENT_SECRET ?? "",
+    // Company API key (Salary → Settings → Company) — scopes the access token to a company.
     apiKey: process.env.SALARY_API_KEY ?? "",
     base: optional("SALARY_API_BASE", "https://api.salary.dk"),
-    /** Optional — scopes list endpoints to one company when the key spans several. */
-    companyId: process.env.SALARY_COMPANY_ID ?? "",
   },
 
   /** When true, write tools simulate and record a dry_run audit entry instead of mutating. */

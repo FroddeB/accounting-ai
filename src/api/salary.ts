@@ -7,7 +7,7 @@ salaryRouter.use(requireAuth);
 
 function handle(res: import("express").Response, err: unknown, what: string): void {
   if (err instanceof SalaryNotConfiguredError) {
-    res.status(503).json({ error: "Salary.dk is not configured (SALARY_API_KEY missing)" });
+    res.status(503).json({ error: "Salary.dk is not configured (needs API client + company key)" });
   } else if (err instanceof SalaryApiError) {
     console.error(`[salary] ${what}:`, err.status, err.body);
     res.status(502).json({ error: `Salary.dk error (${err.status})`, detail: err.body });
